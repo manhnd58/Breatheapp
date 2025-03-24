@@ -13,19 +13,19 @@ import javafx.util.Duration;
 public class BreatheApp extends Application {
     @Override
     public void start(Stage primaryStage) {
-        // Vòng tròn trung tâm
-        Circle circle = new Circle(100);
-        circle.setFill(Color.web("#87CEEB")); // Màu xanh nhẹ
 
-        // Văn bản hướng dẫn
+        Circle circle = new Circle(100);
+        circle.setFill(Color.web("#87CEEB")); 
+
+       
         Text text = new Text("Hít vào");
         text.setStyle("-fx-font-size: 24px; -fx-font-weight: bold;");
 
-        // Container
+
         StackPane root = new StackPane(circle, text);
         Scene scene = new Scene(root, 400, 400);
 
-        // Hiệu ứng phóng to / thu nhỏ
+
         ScaleTransition scaleTransition = new ScaleTransition(Duration.seconds(4), circle);
         scaleTransition.setFromX(1);
         scaleTransition.setFromY(1);
@@ -35,7 +35,7 @@ public class BreatheApp extends Application {
         scaleTransition.setAutoReverse(true);
         scaleTransition.play();
 
-        // Đổi văn bản theo chu kỳ
+
         scaleTransition.currentTimeProperty().addListener((obs, oldTime, newTime) -> {
             double progress = newTime.toSeconds() % 4;
             if (progress < 2) {
@@ -45,7 +45,7 @@ public class BreatheApp extends Application {
             }
         });
 
-        // Cài đặt Stage
+
         primaryStage.setTitle("Breathe App");
         primaryStage.setScene(scene);
         primaryStage.show();
