@@ -27,15 +27,15 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 
-public class MainApplication extends Application {
+public class Tasks extends Application {
 
-    public static ObservableList<Task> sharedTasks = FXCollections.observableArrayList();
+    public static ObservableList<LinkTasksAndCal> sharedTasks = FXCollections.observableArrayList();
     private static Stage mainStage;
-    private ListView<Task> taskListView = new ListView<>(sharedTasks);
+    private ListView<LinkTasksAndCal> taskListView = new ListView<>(sharedTasks);
     private ProgressBar completionProgressBar = new ProgressBar(0);
     private Label completionLabel = new Label("0/0");
     private DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm dd/MM/yyyy", new java.util.Locale("vi", "VN"));
-    private CalendarApp calendarApp;
+    private Calendar calendarApp;
     private VBox notificationArea;
     private static final String DB_URL = "jdbc:sqlserver://localhost:1433;databaseName=TaskManagerDB;encrypt=true;trustServerCertificate=true";
     private static final String DB_USER = "sa";
@@ -125,7 +125,7 @@ public class MainApplication extends Application {
             boolean success = false;
             if (db.hasString()) {
                 int draggedIndex = Integer.parseInt(db.getString());
-                Task draggedTask = sharedTasks.get(draggedIndex);
+                LinkTasksAndCal draggedTask = sharedTasks.get(draggedIndex);
                 int dropIndex = taskListView.getItems().indexOf(event.getGestureTarget() instanceof TaskListCell ?
                         ((TaskListCell) event.getGestureTarget()).getItem() : draggedTask);
 
@@ -216,7 +216,7 @@ public class MainApplication extends Application {
     }
 
     // Lưu hoặc cập nhật task vào cơ sở dữ liệu
-    public void saveTask(Task task) throws SQLException {
+    public void saveTask(LinkTasksAndCal task) throws SQLException {
         if (task.getTitle() == null || task.getTitle().trim().isEmpty()) {
             throw new SQLException("Task title cannot be null or empty.");
         }
@@ -261,8 +261,8 @@ public class MainApplication extends Application {
     }
 
     // Lấy tất cả tasks từ cơ sở dữ liệu
-    private List<Task> getAllTasks() throws SQLException {
-        List<Task> tasks = new ArrayList<>();
+    private List<LinkTasksAndCal> getAllTasks() throws SQLException {
+        List<LinkTasksAndCal> tasks = new ArrayList<>();
         String sql = "SELECT * FROM tasks";
         try (Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
              Statement stmt = conn.createStatement();
@@ -270,7 +270,7 @@ public class MainApplication extends Application {
             while (rs.next()) {
                 String startTimeStr = rs.getString("start_time");
                 String endTimeStr = rs.getString("end_time");
-                Task task = new Task(
+                LinkTasksAndCal task = new LinkTasksAndCal(
                         rs.getString("title"),
                         startTimeStr != null && !startTimeStr.isEmpty() ? LocalDateTime.parse(startTimeStr, SQL_DATE_FORMATTER) : null,
                         endTimeStr != null && !endTimeStr.isEmpty() ? LocalDateTime.parse(endTimeStr, SQL_DATE_FORMATTER) : null,
@@ -290,7 +290,7 @@ public class MainApplication extends Application {
     }
 
     // Lấy task theo id
-    private Task getTaskById(String id) throws SQLException {
+    private LinkTasksAndCal getTaskById(String id) throws SQLException {
         String sql = "SELECT * FROM tasks WHERE id = ?";
         try (Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
@@ -299,7 +299,7 @@ public class MainApplication extends Application {
                 if (rs.next()) {
                     String startTimeStr = rs.getString("start_time");
                     String endTimeStr = rs.getString("end_time");
-                    Task task = new Task(
+                    LinkTasksAndCal task = new LinkTasksAndCal(
                             rs.getString("title"),
                             startTimeStr != null && !startTimeStr.isEmpty() ? LocalDateTime.parse(startTimeStr, SQL_DATE_FORMATTER) : null,
                             endTimeStr != null && !endTimeStr.isEmpty() ? LocalDateTime.parse(endTimeStr, SQL_DATE_FORMATTER) : null,
@@ -349,7 +349,7 @@ public class MainApplication extends Application {
         notificationArea.getChildren().clear();
         boolean hasOverdue = false;
         LocalDateTime now = LocalDateTime.now(APP_ZONE_ID); // Sử dụng múi giờ GMT+7
-        for (Task task : sharedTasks) {
+        for (LinkTasksAndCal task : sharedTasks) {
             if (task.getEndTime() != null && now.isAfter(task.getEndTime()) && !task.isCompleted()) {
                 HBox notification = new HBox(10);
                 Label message = new Label("Overdue: " + task.getTitle() + " (Due: " + dateTimeFormatter.format(task.getEndTime()) + ")");
@@ -419,12 +419,12 @@ public class MainApplication extends Application {
     }
 
     private void showCalendar() {
-        if (CalendarApp.getCalendarStage() == null) {
-            calendarApp = new CalendarApp();
+        if (Calendar.getCalendarStage() == null) {
+            calendarApp = new Calendar();
             Stage calendarStage = new Stage();
             calendarApp.start(calendarStage);
         } else {
-            CalendarApp.getCalendarStage().toFront();
+            Calendar.getCalendarStage().toFront();
         }
     }
 
@@ -444,7 +444,7 @@ public class MainApplication extends Application {
     }
 
     private void sortTasks(String sort) {
-        ObservableList<Task> sortedTasks = taskListView.getItems();
+        ObservableList<LinkTasksAndCal> sortedTasks = taskListView.getItems();
         switch (sort) {
             case "By Title":
                 sortedTasks.sort((t1, t2) -> t1.getTitle().compareToIgnoreCase(t2.getTitle()));
@@ -478,7 +478,7 @@ public class MainApplication extends Application {
         }
     }
 
-    public void showAddEditTaskDialog(Task taskToEdit) {
+    public void showAddEditTaskDialog(LinkTasksAndCal taskToEdit) {
         Stage dialogStage = new Stage();
         dialogStage.initModality(Modality.APPLICATION_MODAL);
         dialogStage.setTitle(taskToEdit == null ? "Add Task" : "Edit Task");
@@ -592,7 +592,7 @@ public class MainApplication extends Application {
                 return;
             }
 
-            Task task = taskToEdit != null ? taskToEdit : new Task(title, startTime, endTime, false);
+            LinkTasksAndCal task = taskToEdit != null ? taskToEdit : new LinkTasksAndCal(title, startTime, endTime, false);
             task.setTitle(title);
             task.setDescription(descriptionArea.getText());
             task.setStartTime(startTime);
@@ -704,7 +704,7 @@ public class MainApplication extends Application {
     }
 
     private void updateCompletionProgress() {
-        long completedCount = sharedTasks.stream().filter(Task::isCompleted).count();
+        long completedCount = sharedTasks.stream().filter(LinkTasksAndCal::isCompleted).count();
         completionProgressBar.setProgress(sharedTasks.isEmpty() ? 0 : (double) completedCount / sharedTasks.size());
         completionLabel.setText(completedCount + "/" + sharedTasks.size());
         checkOverdueTasks();
@@ -728,7 +728,7 @@ public class MainApplication extends Application {
         launch(args);
     }
 
-    private class TaskListCell extends ListCell<Task> {
+    private class TaskListCell extends ListCell<LinkTasksAndCal> {
         private final Label titleLabel = new Label();
         private final Label timeLabel = new Label();
         private final VBox content = new VBox(5);
@@ -770,9 +770,9 @@ public class MainApplication extends Application {
 
             editItem.setOnAction(e -> showAddEditTaskDialog(getItem()));
             duplicateItem.setOnAction(e -> {
-                Task original = getItem();
+                LinkTasksAndCal original = getItem();
                 if (original != null) {
-                    Task newTask = new Task(original.getTitle() + " (Copy)", original.getStartTime(), original.getEndTime(), false);
+                    LinkTasksAndCal newTask = new LinkTasksAndCal(original.getTitle() + " (Copy)", original.getStartTime(), original.getEndTime(), false);
                     newTask.setDescription(original.getDescription());
                     newTask.setDuration(original.getDuration());
                     newTask.setTimeSpentHours(original.getTimeSpentHours());
@@ -790,7 +790,7 @@ public class MainApplication extends Application {
                 }
             });
             deleteItem.setOnAction(e -> {
-                Task task = getItem();
+                LinkTasksAndCal task = getItem();
                 if (task != null) {
                     try {
                         deleteTask(task.getId());
@@ -803,7 +803,7 @@ public class MainApplication extends Application {
                 }
             });
             scheduleItem.setOnAction(e -> {
-                Task task = getItem();
+                LinkTasksAndCal task = getItem();
                 if (task != null) {
                     showAddEditTaskDialog(task);
                 }
@@ -821,7 +821,7 @@ public class MainApplication extends Application {
                 boolean success = false;
                 if (db.hasString()) {
                     int draggedIndex = Integer.parseInt(db.getString());
-                    Task draggedTask = sharedTasks.get(draggedIndex);
+                    LinkTasksAndCal draggedTask = sharedTasks.get(draggedIndex);
                     int dropIndex = sharedTasks.indexOf(getItem());
 
                     sharedTasks.remove(draggedIndex);
@@ -840,7 +840,7 @@ public class MainApplication extends Application {
         }
 
         @Override
-        protected void updateItem(Task task, boolean empty) {
+        protected void updateItem(LinkTasksAndCal task, boolean empty) {
             super.updateItem(task, empty);
             if (empty || task == null) {
                 setGraphic(null);
