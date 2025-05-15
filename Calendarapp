@@ -20,6 +20,7 @@ import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.sql.SQLException;
 
 public class CalendarApp extends Application {
 
@@ -28,6 +29,7 @@ public class CalendarApp extends Application {
     private final DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy");
     private static Stage calendarStage;
     private final DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("HH:mm dd/MM/yy", new java.util.Locale("vi", "VN"));
+    private static final ZoneId APP_ZONE_ID = ZoneId.of("GMT+7"); // Ép múi giờ GMT+7
 
     static {
         System.setProperty("user.timezone", "GMT+7");
@@ -43,7 +45,7 @@ public class CalendarApp extends Application {
 
         System.out.println("JVM default time zone: " + ZoneId.systemDefault());
         System.out.println("Current time (system): " + LocalDateTime.now());
-        System.out.println("Current time (GMT+7): " + LocalDateTime.now(ZoneId.of("GMT+7")));
+        System.out.println("Current time (GMT+7): " + LocalDateTime.now(APP_ZONE_ID));
 
         BorderPane root = new BorderPane();
         root.setTop(createTopPanel());
@@ -72,7 +74,7 @@ public class CalendarApp extends Application {
         Button todayButton = new Button("Today");
         styleButton(todayButton, "#4C7C8A", "#FFFFFF", 8);
         todayButton.setOnAction(e -> {
-            currentDate = LocalDate.now(ZoneId.of("GMT+7"));
+            currentDate = LocalDate.now(APP_ZONE_ID);
             updateDateText();
         });
 
@@ -217,9 +219,10 @@ public class CalendarApp extends Application {
         dayButton.setPrefSize(40, 40);
         dayButton.setAlignment(Pos.CENTER);
 
-        long taskCount = MainApplication.sharedTasks.stream()
-                .filter(task -> task.getStartTime() != null && task.getStartTime().toLocalDate().equals(date))
-                .count();
+        long taskCount = MainApplication.sharedTasks != null ?
+                MainApplication.sharedTasks.stream()
+                        .filter(task -> task != null && task.getStartTime() != null && task.getStartTime().toLocalDate().equals(date))
+                        .count() : 0;
         if (taskCount > 0) {
             Label badge = new Label(String.valueOf(taskCount));
             badge.setStyle("-fx-background-color: #FFCA28; -fx-background-radius: 10; -fx-padding: 2 4; -fx-font-size: 10; -fx-text-fill: #2D3E50;");
@@ -229,17 +232,18 @@ public class CalendarApp extends Application {
             dayPane.getChildren().add(dayButton);
         }
 
-        String taskTitles = MainApplication.sharedTasks.stream()
-                .filter(task -> task.getStartTime() != null && task.getStartTime().toLocalDate().equals(date))
-                .map(Task::getTitle)
-                .collect(Collectors.joining("\n"));
+        String taskTitles = MainApplication.sharedTasks != null ?
+                MainApplication.sharedTasks.stream()
+                        .filter(task -> task != null && task.getStartTime() != null && task.getStartTime().toLocalDate().equals(date))
+                        .map(Task::getTitle)
+                        .collect(Collectors.joining("\n")) : "";
         if (!taskTitles.isEmpty()) {
             Tooltip tooltip = new Tooltip(taskTitles);
             tooltip.setFont(Font.font("Arial", 12));
             Tooltip.install(dayPane, tooltip);
         }
 
-        if (date.equals(LocalDate.now(ZoneId.of("GMT+7")))) {
+        if (date.equals(LocalDate.now(APP_ZONE_ID))) {
             dayButton.setBackground(new Background(new BackgroundFill(Color.web("#A3BFFA"), new CornerRadii(50), null)));
             dayButton.setTextFill(Color.WHITE);
         }
@@ -323,7 +327,7 @@ public class CalendarApp extends Application {
                 if (db.hasString()) {
                     String taskId = db.getString();
                     Task taskToMove = MainApplication.sharedTasks.stream()
-                            .filter(t -> t.getId().equals(taskId))
+                            .filter(t -> t != null && t.getId() != null && t.getId().equals(taskId))
                             .findFirst()
                             .orElse(null);
                     if (taskToMove != null) {
@@ -336,8 +340,14 @@ public class CalendarApp extends Application {
                         if (taskToMove.getEndTime() != null && taskToMove.getEndTime().isBefore(newStartTime)) {
                             taskToMove.setEndTime(newStartTime.plusHours(1));
                         }
-                        success = true;
-                        updateEventsDisplay(hoursBox);
+                        try {
+                            new MainApplication().saveTask(taskToMove); // Đồng bộ với cơ sở dữ liệu
+                            success = true;
+                            updateEventsDisplay(hoursBox);
+                        } catch (SQLException ex) {
+                            new MainApplication().showAlert("Database Error", "Failed to update task time: " + ex.getMessage());
+                            ex.printStackTrace();
+                        }
                     }
                 }
                 event.setDropCompleted(success);
@@ -356,7 +366,7 @@ public class CalendarApp extends Application {
         AnimationTimer timer = new AnimationTimer() {
             @Override
             public void handle(long now) {
-                LocalTime currentTime = LocalTime.now(ZoneId.of("GMT+7"));
+                LocalTime currentTime = LocalTime.now(APP_ZONE_ID);
                 double rowHeight = 40;
                 double yPosition = rowHeight * currentTime.getHour() + (rowHeight * currentTime.getMinute() / 60.0);
                 yPosition += 40; // Shift down by "All Day" row
@@ -378,7 +388,9 @@ public class CalendarApp extends Application {
 
         updateEventsDisplay(hoursBox);
 
-        MainApplication.sharedTasks.addListener((javafx.collections.ListChangeListener<Task>) c -> updateEventsDisplay(hoursBox));
+        if (MainApplication.sharedTasks != null) {
+            MainApplication.sharedTasks.addListener((javafx.collections.ListChangeListener<Task>) c -> updateEventsDisplay(hoursBox));
+        }
 
         return scrollPane;
     }
@@ -388,6 +400,16 @@ public class CalendarApp extends Application {
             HBox row = (HBox) hoursBox.getChildren().get(i);
             VBox eventsBox = (VBox) row.getChildren().get(1);
             eventsBox.getChildren().clear();
+        }
+
+        if (MainApplication.sharedTasks == null || MainApplication.sharedTasks.isEmpty()) {
+            HBox allDayRow = (HBox) hoursBox.getChildren().get(0);
+            VBox allDayEventsBox = (VBox) allDayRow.getChildren().get(1);
+            Label noTasksLabel = new Label("No tasks available for this day.");
+            noTasksLabel.setFont(Font.font("Arial", 12));
+            noTasksLabel.setTextFill(Color.web("#A9B5BB"));
+            allDayEventsBox.getChildren().add(noTasksLabel);
+            return;
         }
 
         for (Task task : MainApplication.sharedTasks) {
@@ -442,23 +464,37 @@ public class CalendarApp extends Application {
         MenuItem deleteItem = new MenuItem("Delete");
         MenuItem moveToTaskListItem = new MenuItem("Move to Task List");
 
+        MainApplication mainAppInstance = new MainApplication();
+
         editItem.setOnAction(e -> {
             if (MainApplication.getMainStage() == null) {
-                MainApplication mainApp = new MainApplication();
                 Stage mainStage = new Stage();
-                mainApp.start(mainStage);
+                mainAppInstance.start(mainStage);
             }
-            new MainApplication().showAddEditTaskDialog(task);
+            mainAppInstance.showAddEditTaskDialog(task);
         });
 
         deleteItem.setOnAction(e -> {
-            MainApplication.sharedTasks.remove(task);
+            try {
+                mainAppInstance.deleteTask(task.getId()); // Đồng bộ với cơ sở dữ liệu
+                MainApplication.sharedTasks.remove(task);
+                updateEventsDisplay((VBox) ((HBox) targetEventsBox.getParent()).getParent());
+            } catch (SQLException ex) {
+                mainAppInstance.showAlert("Database Error", "Failed to delete task: " + ex.getMessage());
+                ex.printStackTrace();
+            }
         });
 
         moveToTaskListItem.setOnAction(e -> {
             task.setStartTime(null);
             task.setEndTime(null);
-            updateEventsDisplay((VBox) ((HBox) targetEventsBox.getParent()).getParent());
+            try {
+                mainAppInstance.saveTask(task); // Đồng bộ với cơ sở dữ liệu
+                updateEventsDisplay((VBox) ((HBox) targetEventsBox.getParent()).getParent());
+            } catch (SQLException ex) {
+                mainAppInstance.showAlert("Database Error", "Failed to move task to task list: " + ex.getMessage());
+                ex.printStackTrace();
+            }
         });
 
         contextMenu.getItems().addAll(editItem, deleteItem, moveToTaskListItem);
@@ -512,10 +548,10 @@ public class CalendarApp extends Application {
         String timeText = "";
         if (task.getStartTime() != null && task.getEndTime() != null) {
             timeText = timeFormatter.format(task.getStartTime()) + " - " + timeFormatter.format(task.getEndTime());
-            timeLabel.setTextFill(LocalDateTime.now().isAfter(task.getEndTime()) && !task.isCompleted() ? Color.RED : Color.web("#2D3E50"));
+            timeLabel.setTextFill(LocalDateTime.now(APP_ZONE_ID).isAfter(task.getEndTime()) && !task.isCompleted() ? Color.RED : Color.web("#2D3E50"));
         } else if (task.getEndTime() != null) {
             timeText = "Hết hạn: " + timeFormatter.format(task.getEndTime());
-            timeLabel.setTextFill(LocalDateTime.now().isAfter(task.getEndTime()) && !task.isCompleted() ? Color.RED : Color.web("#2D3E50"));
+            timeLabel.setTextFill(LocalDateTime.now(APP_ZONE_ID).isAfter(task.getEndTime()) && !task.isCompleted() ? Color.RED : Color.web("#2D3E50"));
         }
         timeLabel.setText(timeText);
         timeLabel.setFont(Font.font("Arial", 8));
@@ -538,23 +574,37 @@ public class CalendarApp extends Application {
         MenuItem deleteItem = new MenuItem("Delete");
         MenuItem moveToTaskListItem = new MenuItem("Move to Task List");
 
+        MainApplication mainAppInstance = new MainApplication();
+
         editItem.setOnAction(e -> {
             if (MainApplication.getMainStage() == null) {
-                MainApplication mainApp = new MainApplication();
                 Stage mainStage = new Stage();
-                mainApp.start(mainStage);
+                mainAppInstance.start(mainStage);
             }
-            new MainApplication().showAddEditTaskDialog(task);
+            mainAppInstance.showAddEditTaskDialog(task);
         });
 
         deleteItem.setOnAction(e -> {
-            MainApplication.sharedTasks.remove(task);
+            try {
+                mainAppInstance.deleteTask(task.getId()); // Đồng bộ với cơ sở dữ liệu
+                MainApplication.sharedTasks.remove(task);
+                updateEventsDisplay((VBox) ((HBox) targetEventsBox.getParent()).getParent());
+            } catch (SQLException ex) {
+                mainAppInstance.showAlert("Database Error", "Failed to delete task: " + ex.getMessage());
+                ex.printStackTrace();
+            }
         });
 
         moveToTaskListItem.setOnAction(e -> {
             task.setStartTime(null);
             task.setEndTime(null);
-            updateEventsDisplay((VBox) ((HBox) targetEventsBox.getParent()).getParent());
+            try {
+                mainAppInstance.saveTask(task); // Đồng bộ với cơ sở dữ liệu
+                updateEventsDisplay((VBox) ((HBox) targetEventsBox.getParent()).getParent());
+            } catch (SQLException ex) {
+                mainAppInstance.showAlert("Database Error", "Failed to move task to task list: " + ex.getMessage());
+                ex.printStackTrace();
+            }
         });
 
         contextMenu.getItems().addAll(editItem, deleteItem, moveToTaskListItem);
