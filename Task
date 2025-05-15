@@ -4,7 +4,7 @@ import javafx.beans.property.*;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
-public class Task {
+public class LinkTasksAndCal {
     private final StringProperty title = new SimpleStringProperty("");
     private final StringProperty description = new SimpleStringProperty("");
     private final ObjectProperty<LocalDateTime> startTime = new SimpleObjectProperty<>();
@@ -17,7 +17,7 @@ public class Task {
     private final StringProperty priority = new SimpleStringProperty("Medium"); // Thêm priority
     private String id;
 
-    public Task(String title, LocalDateTime startTime, LocalDateTime endTime, boolean completed) {
+    public LinkTasksAndCal(String title, LocalDateTime startTime, LocalDateTime endTime, boolean completed) {
         this.title.set(title);
         this.startTime.set(startTime);
         this.endTime.set(endTime);
