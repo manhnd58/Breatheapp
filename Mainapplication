@@ -1,3 +1,5 @@
+package application;
+
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
 import javafx.application.Application;
@@ -663,3 +665,5 @@ public class MainApplication extends Application {
     private void styleSpinner(Spinner<?> spinner) {
         spinner.setStyle("-fx-background-color: #F5F8FA; -fx-border-color: #B0BEC5; -fx-border-radius: 4; -fx-padding: 6;");
         spinner.getEditor().setFont(Font.font("Arial", 14));
+    }
+}
