@@ -20,12 +20,16 @@ import javafx.scene.text.FontWeight;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
 import javafx.util.Duration;
+import java.sql.*;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
 
 public class MainApplication extends Application {
 
-    static ObservableList<Task> sharedTasks = FXCollections.observableArrayList();
+    public static ObservableList<Task> sharedTasks = FXCollections.observableArrayList();
     private static Stage mainStage;
     private ListView<Task> taskListView = new ListView<>(sharedTasks);
     private ProgressBar completionProgressBar = new ProgressBar(0);
@@ -33,11 +37,47 @@ public class MainApplication extends Application {
     private DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm dd/MM/yyyy", new java.util.Locale("vi", "VN"));
     private CalendarApp calendarApp;
     private VBox notificationArea;
+    private static final String DB_URL = "jdbc:sqlserver://localhost:1433;databaseName=TaskManagerDB;encrypt=true;trustServerCertificate=true";
+    private static final String DB_USER = "sa";
+    private static final String DB_PASSWORD = "123456789";
+    private static final DateTimeFormatter SQL_DATE_FORMATTER = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
+    private static final ZoneId APP_ZONE_ID = ZoneId.of("GMT+7"); // Ép múi giờ GMT+7
 
     @Override
     public void start(Stage primaryStage) {
         mainStage = primaryStage;
         primaryStage.setTitle("Study Task Manager");
+
+        // Đăng ký JDBC Driver
+        try {
+            Class.forName("com.microsoft.sqlserver.jdbc.SQLServerDriver");
+        } catch (ClassNotFoundException e) {
+            showAlert("Driver Error", "JDBC Driver not found. Please add the Microsoft SQL Server JDBC Driver to your project.");
+            e.printStackTrace();
+            return;
+        }
+
+        // Kiểm tra kết nối cơ sở dữ liệu trước khi khởi tạo
+        if (!testDatabaseConnection()) {
+            // Thử tạo cơ sở dữ liệu nếu không tồn tại
+            if (!createDatabase()) {
+                showAlert("Critical Error", "Cannot connect to database or create TaskManagerDB. Please check your configuration and try again.");
+                return;
+            }
+        }
+
+        // Khởi tạo cơ sở dữ liệu
+        initializeDatabase();
+
+        // Tải tasks từ cơ sở dữ liệu
+        try {
+            sharedTasks.clear(); // Đảm bảo danh sách rỗng trước khi tải
+            sharedTasks.addAll(getAllTasks());
+        } catch (SQLException e) {
+            showAlert("Database Error", "Failed to load tasks from database: " + e.getMessage());
+            e.printStackTrace();
+            sharedTasks = FXCollections.observableArrayList(); // Khởi tạo lại nếu lỗi
+        }
 
         BorderPane mainLayout = new BorderPane();
         mainLayout.setPadding(new Insets(10));
@@ -47,7 +87,6 @@ public class MainApplication extends Application {
         VBox centerLayout = new VBox(10);
         centerLayout.setPadding(new Insets(10));
         notificationArea = createNotificationArea();
-        // Add search field
         TextField searchField = new TextField();
         searchField.setPromptText("Search tasks...");
         searchField.setStyle("-fx-background-color: #F5F8FA; -fx-border-color: #B0BEC5; -fx-border-radius: 4; -fx-padding: 8;");
@@ -96,6 +135,12 @@ public class MainApplication extends Application {
 
                 sharedTasks.remove(draggedIndex);
                 sharedTasks.add(dropIndex, draggedTask);
+                try {
+                    saveTask(draggedTask);
+                } catch (SQLException e) {
+                    showAlert("Database Error", "Failed to save task order: " + e.getMessage());
+                    e.printStackTrace();
+                }
                 success = true;
             }
             event.setDropCompleted(success);
@@ -105,7 +150,6 @@ public class MainApplication extends Application {
         taskListView.setOnDragDone(DragEvent::consume);
 
         Scene scene = new Scene(mainLayout, 500, 600);
-        // Add Ctrl+N shortcut
         scene.setOnKeyPressed(e -> {
             if (e.getCode() == KeyCode.N && e.isControlDown()) {
                 showAddEditTaskDialog(null);
@@ -115,6 +159,174 @@ public class MainApplication extends Application {
         primaryStage.setX(0);
         primaryStage.setOnCloseRequest(e -> mainStage = null);
         primaryStage.show();
+    }
+
+    // Kiểm tra kết nối cơ sở dữ liệu
+    private boolean testDatabaseConnection() {
+        try (Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD)) {
+            return true;
+        } catch (SQLException e) {
+            System.err.println("Database connection failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    // Tạo cơ sở dữ liệu TaskManagerDB nếu chưa tồn tại
+    private boolean createDatabase() {
+        String masterUrl = "jdbc:sqlserver://localhost:1433;databaseName=master;encrypt=true;trustServerCertificate=true";
+        try (Connection conn = DriverManager.getConnection(masterUrl, DB_USER, DB_PASSWORD)) {
+            Statement stmt = conn.createStatement();
+            String sql = "IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = 'TaskManagerDB') " +
+                        "CREATE DATABASE TaskManagerDB;";
+            stmt.execute(sql);
+            return true;
+        } catch (SQLException e) {
+            System.err.println("Failed to create database: " + e.getMessage());
+            return false;
+        }
+    }
+
+    // Khởi tạo bảng tasks trong MSSQL
+    private void initializeDatabase() {
+        try (Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD)) {
+            Statement stmt = conn.createStatement();
+            String sql = """
+                IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'tasks')
+                CREATE TABLE tasks (
+                    id NVARCHAR(36) PRIMARY KEY,
+                    title NVARCHAR(255) NOT NULL,
+                    description NVARCHAR(MAX),
+                    start_time DATETIME,
+                    end_time DATETIME,
+                    duration BIGINT,
+                    time_spent_hours INT,
+                    time_spent_minutes INT,
+                    recurrence NVARCHAR(50),
+                    completed BIT NOT NULL DEFAULT 0,
+                    priority NVARCHAR(50)
+                );
+                IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_tasks_title')
+                CREATE INDEX idx_tasks_title ON tasks (title);
+                """;
+            stmt.execute(sql);
+        } catch (SQLException e) {
+            showAlert("Database Error", "Failed to initialize database: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    // Lưu hoặc cập nhật task vào cơ sở dữ liệu
+    public void saveTask(Task task) throws SQLException {
+        if (task.getTitle() == null || task.getTitle().trim().isEmpty()) {
+            throw new SQLException("Task title cannot be null or empty.");
+        }
+        if (task.getTitle().length() > 255) {
+            throw new SQLException("Task title exceeds maximum length of 255 characters.");
+        }
+
+        String sql = task.getId() == null || getTaskById(task.getId()) == null ?
+                "INSERT INTO tasks (id, title, description, start_time, end_time, duration, time_spent_hours, time_spent_minutes, recurrence, completed, priority) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)" :
+                "UPDATE tasks SET title = ?, description = ?, start_time = ?, end_time = ?, duration = ?, time_spent_hours = ?, time_spent_minutes = ?, recurrence = ?, completed = ?, priority = ? WHERE id = ?";
+
+        try (Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            if (task.getId() == null || getTaskById(task.getId()) == null) {
+                task.setId(java.util.UUID.randomUUID().toString());
+                pstmt.setString(1, task.getId());
+                pstmt.setString(2, task.getTitle());
+                pstmt.setString(3, task.getDescription());
+                pstmt.setString(4, task.getStartTime() != null ? task.getStartTime().format(SQL_DATE_FORMATTER) : null);
+                pstmt.setString(5, task.getEndTime() != null ? task.getEndTime().format(SQL_DATE_FORMATTER) : null);
+                pstmt.setLong(6, task.getDuration());
+                pstmt.setInt(7, task.getTimeSpentHours());
+                pstmt.setInt(8, task.getTimeSpentMinutes());
+                pstmt.setString(9, task.getRecurrence());
+                pstmt.setBoolean(10, task.isCompleted());
+                pstmt.setString(11, task.getPriority());
+            } else {
+                pstmt.setString(1, task.getTitle());
+                pstmt.setString(2, task.getDescription());
+                pstmt.setString(3, task.getStartTime() != null ? task.getStartTime().format(SQL_DATE_FORMATTER) : null);
+                pstmt.setString(4, task.getEndTime() != null ? task.getEndTime().format(SQL_DATE_FORMATTER) : null);
+                pstmt.setLong(5, task.getDuration());
+                pstmt.setInt(6, task.getTimeSpentHours());
+                pstmt.setInt(7, task.getTimeSpentMinutes());
+                pstmt.setString(8, task.getRecurrence());
+                pstmt.setBoolean(9, task.isCompleted());
+                pstmt.setString(10, task.getPriority());
+                pstmt.setString(11, task.getId());
+            }
+            pstmt.executeUpdate();
+        }
+    }
+
+    // Lấy tất cả tasks từ cơ sở dữ liệu
+    private List<Task> getAllTasks() throws SQLException {
+        List<Task> tasks = new ArrayList<>();
+        String sql = "SELECT * FROM tasks";
+        try (Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            while (rs.next()) {
+                String startTimeStr = rs.getString("start_time");
+                String endTimeStr = rs.getString("end_time");
+                Task task = new Task(
+                        rs.getString("title"),
+                        startTimeStr != null && !startTimeStr.isEmpty() ? LocalDateTime.parse(startTimeStr, SQL_DATE_FORMATTER) : null,
+                        endTimeStr != null && !endTimeStr.isEmpty() ? LocalDateTime.parse(endTimeStr, SQL_DATE_FORMATTER) : null,
+                        rs.getBoolean("completed")
+                );
+                task.setId(rs.getString("id"));
+                task.setDescription(rs.getString("description"));
+                task.setDuration(rs.getLong("duration"));
+                task.setTimeSpentHours(rs.getInt("time_spent_hours"));
+                task.setTimeSpentMinutes(rs.getInt("time_spent_minutes"));
+                task.setRecurrence(rs.getString("recurrence"));
+                task.setPriority(rs.getString("priority"));
+                tasks.add(task);
+            }
+        }
+        return tasks;
+    }
+
+    // Lấy task theo id
+    private Task getTaskById(String id) throws SQLException {
+        String sql = "SELECT * FROM tasks WHERE id = ?";
+        try (Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, id);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    String startTimeStr = rs.getString("start_time");
+                    String endTimeStr = rs.getString("end_time");
+                    Task task = new Task(
+                            rs.getString("title"),
+                            startTimeStr != null && !startTimeStr.isEmpty() ? LocalDateTime.parse(startTimeStr, SQL_DATE_FORMATTER) : null,
+                            endTimeStr != null && !endTimeStr.isEmpty() ? LocalDateTime.parse(endTimeStr, SQL_DATE_FORMATTER) : null,
+                            rs.getBoolean("completed")
+                    );
+                    task.setId(rs.getString("id"));
+                    task.setDescription(rs.getString("description"));
+                    task.setDuration(rs.getLong("duration"));
+                    task.setTimeSpentHours(rs.getInt("time_spent_hours"));
+                    task.setTimeSpentMinutes(rs.getInt("time_spent_minutes"));
+                    task.setRecurrence(rs.getString("recurrence"));
+                    task.setPriority(rs.getString("priority"));
+                    return task;
+                }
+            }
+        }
+        return null;
+    }
+
+    // Xóa task khỏi cơ sở dữ liệu
+    public void deleteTask(String id) throws SQLException {
+        String sql = "DELETE FROM tasks WHERE id = ?";
+        try (Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, id);
+            pstmt.executeUpdate();
+        }
     }
 
     private VBox createNotificationArea() {
@@ -136,8 +348,9 @@ public class MainApplication extends Application {
     private void checkOverdueTasks() {
         notificationArea.getChildren().clear();
         boolean hasOverdue = false;
+        LocalDateTime now = LocalDateTime.now(APP_ZONE_ID); // Sử dụng múi giờ GMT+7
         for (Task task : sharedTasks) {
-            if (task.getEndTime() != null && LocalDateTime.now().isAfter(task.getEndTime()) && !task.isCompleted()) {
+            if (task.getEndTime() != null && now.isAfter(task.getEndTime()) && !task.isCompleted()) {
                 HBox notification = new HBox(10);
                 Label message = new Label("Overdue: " + task.getTitle() + " (Due: " + dateTimeFormatter.format(task.getEndTime()) + ")");
                 message.setFont(Font.font("Arial", 12));
@@ -247,7 +460,7 @@ public class MainApplication extends Application {
                 sortedTasks.sort((t1, t2) -> {
                     int p1 = getPriorityValue(t1.getPriority());
                     int p2 = getPriorityValue(t2.getPriority());
-                    return Integer.compare(p2, p1); // High to Low
+                    return Integer.compare(p2, p1);
                 });
                 break;
             default:
@@ -360,6 +573,10 @@ public class MainApplication extends Application {
                 showAlert("Error", "Please enter a task title.");
                 return;
             }
+            if (title.length() > 255) {
+                showAlert("Error", "Task title cannot exceed 255 characters.");
+                return;
+            }
             if (taskToEdit == null && sharedTasks.stream().anyMatch(t -> t.getTitle().equalsIgnoreCase(title))) {
                 showAlert("Error", "A task with this title already exists.");
                 return;
@@ -375,42 +592,48 @@ public class MainApplication extends Application {
                 return;
             }
 
-            if (taskToEdit == null) {
-                Task newTask = new Task(title, startTime, endTime, false);
-                newTask.setDescription(descriptionArea.getText());
-                newTask.setDuration(durationSpinner.getValue());
-                newTask.setTimeSpentHours(timeSpentHoursSpinner.getValue());
-                newTask.setTimeSpentMinutes(timeSpentMinutesSpinner.getValue());
-                newTask.setRecurrence(recurrenceCombo.getValue());
-                newTask.setPriority(priorityCombo.getValue());
-                sharedTasks.add(newTask);
-            } else {
-                taskToEdit.setTitle(title);
-                taskToEdit.setDescription(descriptionArea.getText());
-                taskToEdit.setStartTime(startTime);
-                taskToEdit.setEndTime(endTime);
-                taskToEdit.setDuration(durationSpinner.getValue());
-                taskToEdit.setTimeSpentHours(timeSpentHoursSpinner.getValue());
-                taskToEdit.setTimeSpentMinutes(timeSpentMinutesSpinner.getValue());
-                taskToEdit.setRecurrence(recurrenceCombo.getValue());
-                taskToEdit.setPriority(priorityCombo.getValue());
+            Task task = taskToEdit != null ? taskToEdit : new Task(title, startTime, endTime, false);
+            task.setTitle(title);
+            task.setDescription(descriptionArea.getText());
+            task.setStartTime(startTime);
+            task.setEndTime(endTime);
+            task.setDuration(durationSpinner.getValue());
+            task.setTimeSpentHours(timeSpentHoursSpinner.getValue());
+            task.setTimeSpentMinutes(timeSpentMinutesSpinner.getValue());
+            task.setRecurrence(recurrenceCombo.getValue());
+            task.setPriority(priorityCombo.getValue());
+
+            try {
+                saveTask(task);
+                if (taskToEdit == null) {
+                    sharedTasks.add(task);
+                }
+                updateCompletionProgress();
+                checkOverdueTasks();
+                if (startTime != null && calendarApp != null) {
+                    calendarApp.setCurrentDate(startTime.toLocalDate());
+                }
+                dialogStage.close();
+            } catch (SQLException ex) {
+                showAlert("Database Error", "Failed to save task: " + ex.getMessage());
+                ex.printStackTrace();
             }
-            updateCompletionProgress();
-            checkOverdueTasks();
-            if (startTime != null && calendarApp != null) {
-                calendarApp.setCurrentDate(startTime.toLocalDate());
-            }
-            dialogStage.close();
         });
 
         cancelButton.setOnAction(e -> dialogStage.close());
 
         deleteButton.setOnAction(e -> {
             if (taskToEdit != null) {
-                sharedTasks.remove(taskToEdit);
-                updateCompletionProgress();
-                checkOverdueTasks();
-                dialogStage.close();
+                try {
+                    deleteTask(taskToEdit.getId());
+                    sharedTasks.remove(taskToEdit);
+                    updateCompletionProgress();
+                    checkOverdueTasks();
+                    dialogStage.close();
+                } catch (SQLException ex) {
+                    showAlert("Database Error", "Failed to delete task: " + ex.getMessage());
+                    ex.printStackTrace();
+                }
             }
         });
 
@@ -487,7 +710,7 @@ public class MainApplication extends Application {
         checkOverdueTasks();
     }
 
-    private void showAlert(String title, String content) {
+    void showAlert(String title, String content) {
         Alert alert = new Alert(Alert.AlertType.ERROR);
         alert.setTitle(title);
         alert.setHeaderText(null);
@@ -556,15 +779,27 @@ public class MainApplication extends Application {
                     newTask.setTimeSpentMinutes(original.getTimeSpentMinutes());
                     newTask.setRecurrence(original.getRecurrence());
                     newTask.setPriority(original.getPriority());
-                    sharedTasks.add(newTask);
-                    updateCompletionProgress();
+                    try {
+                        saveTask(newTask);
+                        sharedTasks.add(newTask);
+                        updateCompletionProgress();
+                    } catch (SQLException ex) {
+                        showAlert("Database Error", "Failed to duplicate task: " + ex.getMessage());
+                        ex.printStackTrace();
+                    }
                 }
             });
             deleteItem.setOnAction(e -> {
                 Task task = getItem();
                 if (task != null) {
-                    sharedTasks.remove(task);
-                    updateCompletionProgress();
+                    try {
+                        deleteTask(task.getId());
+                        sharedTasks.remove(task);
+                        updateCompletionProgress();
+                    } catch (SQLException ex) {
+                        showAlert("Database Error", "Failed to delete task: " + ex.getMessage());
+                        ex.printStackTrace();
+                    }
                 }
             });
             scheduleItem.setOnAction(e -> {
@@ -591,7 +826,13 @@ public class MainApplication extends Application {
 
                     sharedTasks.remove(draggedIndex);
                     sharedTasks.add(dropIndex, draggedTask);
-                    success = true;
+                    try {
+                        saveTask(draggedTask);
+                        success = true;
+                    } catch (SQLException ex) {
+                        showAlert("Database Error", "Failed to reorder task: " + ex.getMessage());
+                        ex.printStackTrace();
+                    }
                 }
                 event.setDropCompleted(success);
                 event.consume();
@@ -610,7 +851,7 @@ public class MainApplication extends Application {
                 titleLabel.setTextFill(Color.web("#2D3E50"));
 
                 String timeText = "";
-                boolean isOverdue = task.getEndTime() != null && LocalDateTime.now().isAfter(task.getEndTime()) && !task.isCompleted();
+                boolean isOverdue = task.getEndTime() != null && LocalDateTime.now(APP_ZONE_ID).isAfter(task.getEndTime()) && !task.isCompleted();
                 if (task.getStartTime() != null && task.getEndTime() != null) {
                     timeText = dateTimeFormatter.format(task.getStartTime()) + " - " + dateTimeFormatter.format(task.getEndTime());
                 } else if (task.getEndTime() != null) {
