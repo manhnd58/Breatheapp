@@ -22,7 +22,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.sql.SQLException;
 
-public class CalendarApp extends Application {
+public class Calendar extends Application {
 
     private LocalDate currentDate = LocalDate.now(ZoneId.of("GMT+7"));
     private final Text dateText = new Text();
@@ -35,7 +35,7 @@ public class CalendarApp extends Application {
         System.setProperty("user.timezone", "GMT+7");
     }
 
-    public CalendarApp() {
+    public Calendar() {
     }
 
     @Override
@@ -81,12 +81,12 @@ public class CalendarApp extends Application {
         Button tasksButton = new Button("View Tasks");
         styleButton(tasksButton, "#4C7C8A", "#FFFFFF", 8);
         tasksButton.setOnAction(e -> {
-            if (MainApplication.getMainStage() == null) {
-                MainApplication mainApp = new MainApplication();
+            if (Tasks.getMainStage() == null) {
+                Tasks mainApp = new Tasks();
                 Stage mainStage = new Stage();
                 mainApp.start(mainStage);
             } else {
-                MainApplication.getMainStage().toFront();
+                Tasks.getMainStage().toFront();
             }
         });
 
@@ -219,8 +219,8 @@ public class CalendarApp extends Application {
         dayButton.setPrefSize(40, 40);
         dayButton.setAlignment(Pos.CENTER);
 
-        long taskCount = MainApplication.sharedTasks != null ?
-                MainApplication.sharedTasks.stream()
+        long taskCount = Tasks.sharedTasks != null ?
+                Tasks.sharedTasks.stream()
                         .filter(task -> task != null && task.getStartTime() != null && task.getStartTime().toLocalDate().equals(date))
                         .count() : 0;
         if (taskCount > 0) {
@@ -232,10 +232,10 @@ public class CalendarApp extends Application {
             dayPane.getChildren().add(dayButton);
         }
 
-        String taskTitles = MainApplication.sharedTasks != null ?
-                MainApplication.sharedTasks.stream()
+        String taskTitles = Tasks.sharedTasks != null ?
+                Tasks.sharedTasks.stream()
                         .filter(task -> task != null && task.getStartTime() != null && task.getStartTime().toLocalDate().equals(date))
-                        .map(Task::getTitle)
+                        .map(LinkTasksAndCal::getTitle)
                         .collect(Collectors.joining("\n")) : "";
         if (!taskTitles.isEmpty()) {
             Tooltip tooltip = new Tooltip(taskTitles);
@@ -326,7 +326,7 @@ public class CalendarApp extends Application {
                 boolean success = false;
                 if (db.hasString()) {
                     String taskId = db.getString();
-                    Task taskToMove = MainApplication.sharedTasks.stream()
+                    LinkTasksAndCal taskToMove = Tasks.sharedTasks.stream()
                             .filter(t -> t != null && t.getId() != null && t.getId().equals(taskId))
                             .findFirst()
                             .orElse(null);
@@ -341,11 +341,11 @@ public class CalendarApp extends Application {
                             taskToMove.setEndTime(newStartTime.plusHours(1));
                         }
                         try {
-                            new MainApplication().saveTask(taskToMove); // Đồng bộ với cơ sở dữ liệu
+                            new Tasks().saveTask(taskToMove); // Đồng bộ với cơ sở dữ liệu
                             success = true;
                             updateEventsDisplay(hoursBox);
                         } catch (SQLException ex) {
-                            new MainApplication().showAlert("Database Error", "Failed to update task time: " + ex.getMessage());
+                            new Tasks().showAlert("Database Error", "Failed to update task time: " + ex.getMessage());
                             ex.printStackTrace();
                         }
                     }
@@ -388,8 +388,8 @@ public class CalendarApp extends Application {
 
         updateEventsDisplay(hoursBox);
 
-        if (MainApplication.sharedTasks != null) {
-            MainApplication.sharedTasks.addListener((javafx.collections.ListChangeListener<Task>) c -> updateEventsDisplay(hoursBox));
+        if (Tasks.sharedTasks != null) {
+            Tasks.sharedTasks.addListener((javafx.collections.ListChangeListener<LinkTasksAndCal>) c -> updateEventsDisplay(hoursBox));
         }
 
         return scrollPane;
@@ -402,7 +402,7 @@ public class CalendarApp extends Application {
             eventsBox.getChildren().clear();
         }
 
-        if (MainApplication.sharedTasks == null || MainApplication.sharedTasks.isEmpty()) {
+        if (Tasks.sharedTasks == null || Tasks.sharedTasks.isEmpty()) {
             HBox allDayRow = (HBox) hoursBox.getChildren().get(0);
             VBox allDayEventsBox = (VBox) allDayRow.getChildren().get(1);
             Label noTasksLabel = new Label("No tasks available for this day.");
@@ -412,7 +412,7 @@ public class CalendarApp extends Application {
             return;
         }
 
-        for (Task task : MainApplication.sharedTasks) {
+        for (LinkTasksAndCal task : Tasks.sharedTasks) {
             if (task == null || task.getStartTime() == null || !task.getStartTime().toLocalDate().equals(currentDate)) {
                 continue;
             }
@@ -432,7 +432,7 @@ public class CalendarApp extends Application {
         }
     }
 
-    private HBox createCompactTaskView(Task task, VBox targetEventsBox) {
+    private HBox createCompactTaskView(LinkTasksAndCal task, VBox targetEventsBox) {
         HBox compactView = new HBox(3);
         compactView.setPadding(new Insets(1));
         compactView.setBackground(new Background(new BackgroundFill(Color.web("#F5F8FA"), new CornerRadii(4), null)));
@@ -464,10 +464,10 @@ public class CalendarApp extends Application {
         MenuItem deleteItem = new MenuItem("Delete");
         MenuItem moveToTaskListItem = new MenuItem("Move to Task List");
 
-        MainApplication mainAppInstance = new MainApplication();
+        Tasks mainAppInstance = new Tasks();
 
         editItem.setOnAction(e -> {
-            if (MainApplication.getMainStage() == null) {
+            if (Tasks.getMainStage() == null) {
                 Stage mainStage = new Stage();
                 mainAppInstance.start(mainStage);
             }
@@ -477,7 +477,7 @@ public class CalendarApp extends Application {
         deleteItem.setOnAction(e -> {
             try {
                 mainAppInstance.deleteTask(task.getId()); // Đồng bộ với cơ sở dữ liệu
-                MainApplication.sharedTasks.remove(task);
+                Tasks.sharedTasks.remove(task);
                 updateEventsDisplay((VBox) ((HBox) targetEventsBox.getParent()).getParent());
             } catch (SQLException ex) {
                 mainAppInstance.showAlert("Database Error", "Failed to delete task: " + ex.getMessage());
@@ -530,7 +530,7 @@ public class CalendarApp extends Application {
         return compactView;
     }
 
-    private VBox createDetailedTaskView(Task task, VBox targetEventsBox) {
+    private VBox createDetailedTaskView(LinkTasksAndCal task, VBox targetEventsBox) {
         VBox detailedView = new VBox(1);
         detailedView.setPadding(new Insets(2));
         detailedView.setBackground(new Background(new BackgroundFill(Color.web("#F5F8FA"), new CornerRadii(4), null)));
@@ -574,10 +574,10 @@ public class CalendarApp extends Application {
         MenuItem deleteItem = new MenuItem("Delete");
         MenuItem moveToTaskListItem = new MenuItem("Move to Task List");
 
-        MainApplication mainAppInstance = new MainApplication();
+        Tasks mainAppInstance = new Tasks();
 
         editItem.setOnAction(e -> {
-            if (MainApplication.getMainStage() == null) {
+            if (Tasks.getMainStage() == null) {
                 Stage mainStage = new Stage();
                 mainAppInstance.start(mainStage);
             }
@@ -587,7 +587,7 @@ public class CalendarApp extends Application {
         deleteItem.setOnAction(e -> {
             try {
                 mainAppInstance.deleteTask(task.getId()); // Đồng bộ với cơ sở dữ liệu
-                MainApplication.sharedTasks.remove(task);
+                Tasks.sharedTasks.remove(task);
                 updateEventsDisplay((VBox) ((HBox) targetEventsBox.getParent()).getParent());
             } catch (SQLException ex) {
                 mainAppInstance.showAlert("Database Error", "Failed to delete task: " + ex.getMessage());
