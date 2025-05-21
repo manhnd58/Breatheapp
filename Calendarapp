@@ -1,5 +1,7 @@
 package application;
 
+import LinkTasksAndCal.LinkTasksAndCalModel;
+import Tasks.Tasks;
 import javafx.animation.AnimationTimer;
 import javafx.application.Application;
 import javafx.geometry.HPos;
@@ -8,6 +10,7 @@ import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.effect.DropShadow;
+import javafx.scene.image.Image;
 import javafx.scene.input.*;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
@@ -20,22 +23,20 @@ import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
-import java.sql.SQLException;
 
-public class Calendar extends Application {
+public class CalendarApp extends Application {
 
     private LocalDate currentDate = LocalDate.now(ZoneId.of("GMT+7"));
     private final Text dateText = new Text();
     private final DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy");
     private static Stage calendarStage;
     private final DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("HH:mm dd/MM/yy", new java.util.Locale("vi", "VN"));
-    private static final ZoneId APP_ZONE_ID = ZoneId.of("GMT+7"); // Ép múi giờ GMT+7
 
     static {
         System.setProperty("user.timezone", "GMT+7");
     }
 
-    public Calendar() {
+    public CalendarApp() {
     }
 
     @Override
@@ -45,7 +46,7 @@ public class Calendar extends Application {
 
         System.out.println("JVM default time zone: " + ZoneId.systemDefault());
         System.out.println("Current time (system): " + LocalDateTime.now());
-        System.out.println("Current time (GMT+7): " + LocalDateTime.now(APP_ZONE_ID));
+        System.out.println("Current time (GMT+7): " + LocalDateTime.now(ZoneId.of("GMT+7")));
 
         BorderPane root = new BorderPane();
         root.setTop(createTopPanel());
@@ -55,11 +56,18 @@ public class Calendar extends Application {
 
         Scene scene = new Scene(root, 1000, 700);
         primaryStage.setScene(scene);
-        primaryStage.setX(0);
+        primaryStage.centerOnScreen();
         primaryStage.setOnCloseRequest(e -> calendarStage = null);
         primaryStage.show();
 
+        initIcon(primaryStage);
+
         updateDateText();
+    }
+
+    private void initIcon(Stage primaryStage) {
+        Image image = new Image(getClass().getResourceAsStream("/IconsCal.png"));
+        primaryStage.getIcons().add(image);
     }
 
     private HBox createTopPanel() {
@@ -74,7 +82,7 @@ public class Calendar extends Application {
         Button todayButton = new Button("Today");
         styleButton(todayButton, "#4C7C8A", "#FFFFFF", 8);
         todayButton.setOnAction(e -> {
-            currentDate = LocalDate.now(APP_ZONE_ID);
+            currentDate = LocalDate.now(ZoneId.of("GMT+7"));
             updateDateText();
         });
 
@@ -219,10 +227,9 @@ public class Calendar extends Application {
         dayButton.setPrefSize(40, 40);
         dayButton.setAlignment(Pos.CENTER);
 
-        long taskCount = Tasks.sharedTasks != null ?
-                Tasks.sharedTasks.stream()
-                        .filter(task -> task != null && task.getStartTime() != null && task.getStartTime().toLocalDate().equals(date))
-                        .count() : 0;
+        long taskCount = Tasks.sharedTasks.stream()
+                .filter(task -> task.getStartTime() != null && task.getStartTime().toLocalDate().equals(date))
+                .count();
         if (taskCount > 0) {
             Label badge = new Label(String.valueOf(taskCount));
             badge.setStyle("-fx-background-color: #FFCA28; -fx-background-radius: 10; -fx-padding: 2 4; -fx-font-size: 10; -fx-text-fill: #2D3E50;");
@@ -232,18 +239,17 @@ public class Calendar extends Application {
             dayPane.getChildren().add(dayButton);
         }
 
-        String taskTitles = Tasks.sharedTasks != null ?
-                Tasks.sharedTasks.stream()
-                        .filter(task -> task != null && task.getStartTime() != null && task.getStartTime().toLocalDate().equals(date))
-                        .map(LinkTasksAndCal::getTitle)
-                        .collect(Collectors.joining("\n")) : "";
+        String taskTitles = Tasks.sharedTasks.stream()
+                .filter(task -> task.getStartTime() != null && task.getStartTime().toLocalDate().equals(date))
+                .map(LinkTasksAndCalModel::getTitle)
+                .collect(Collectors.joining("\n"));
         if (!taskTitles.isEmpty()) {
             Tooltip tooltip = new Tooltip(taskTitles);
             tooltip.setFont(Font.font("Arial", 12));
             Tooltip.install(dayPane, tooltip);
         }
 
-        if (date.equals(LocalDate.now(APP_ZONE_ID))) {
+        if (date.equals(LocalDate.now(ZoneId.of("GMT+7")))) {
             dayButton.setBackground(new Background(new BackgroundFill(Color.web("#A3BFFA"), new CornerRadii(50), null)));
             dayButton.setTextFill(Color.WHITE);
         }
@@ -265,14 +271,14 @@ public class Calendar extends Application {
 
         dayButton.setOnMouseEntered(e -> {
             if (!dayButton.getBackground().getFills().get(0).getFill().equals(Color.web("#4C7C8A")) &&
-                !dayButton.getBackground().getFills().get(0).getFill().equals(Color.web("#A3BFFA"))) {
+                    !dayButton.getBackground().getFills().get(0).getFill().equals(Color.web("#A3BFFA"))) {
                 dayButton.setBackground(new Background(new BackgroundFill(Color.web("#E0ECEF"), new CornerRadii(50), null)));
                 dayButton.setBorder(new Border(new BorderStroke(Color.web("#4C7C8A"), BorderStrokeStyle.SOLID, new CornerRadii(50), new BorderWidths(2))));
             }
         });
         dayButton.setOnMouseExited(e -> {
             if (!dayButton.getBackground().getFills().get(0).getFill().equals(Color.web("#4C7C8A")) &&
-                !dayButton.getBackground().getFills().get(0).getFill().equals(Color.web("#A3BFFA"))) {
+                    !dayButton.getBackground().getFills().get(0).getFill().equals(Color.web("#A3BFFA"))) {
                 dayButton.setBackground(new Background(new BackgroundFill(Color.web("#F5F8FA"), new CornerRadii(50), null)));
                 dayButton.setBorder(new Border(new BorderStroke(Color.TRANSPARENT, BorderStrokeStyle.SOLID, new CornerRadii(50), new BorderWidths(2))));
             }
@@ -326,8 +332,8 @@ public class Calendar extends Application {
                 boolean success = false;
                 if (db.hasString()) {
                     String taskId = db.getString();
-                    LinkTasksAndCal taskToMove = Tasks.sharedTasks.stream()
-                            .filter(t -> t != null && t.getId() != null && t.getId().equals(taskId))
+                    LinkTasksAndCalModel taskToMove = Tasks.sharedTasks.stream()
+                            .filter(t -> t.getId().equals(taskId))
                             .findFirst()
                             .orElse(null);
                     if (taskToMove != null) {
@@ -340,14 +346,8 @@ public class Calendar extends Application {
                         if (taskToMove.getEndTime() != null && taskToMove.getEndTime().isBefore(newStartTime)) {
                             taskToMove.setEndTime(newStartTime.plusHours(1));
                         }
-                        try {
-                            new Tasks().saveTask(taskToMove); // Đồng bộ với cơ sở dữ liệu
-                            success = true;
-                            updateEventsDisplay(hoursBox);
-                        } catch (SQLException ex) {
-                            new Tasks().showAlert("Database Error", "Failed to update task time: " + ex.getMessage());
-                            ex.printStackTrace();
-                        }
+                        success = true;
+                        updateEventsDisplay(hoursBox);
                     }
                 }
                 event.setDropCompleted(success);
@@ -366,7 +366,7 @@ public class Calendar extends Application {
         AnimationTimer timer = new AnimationTimer() {
             @Override
             public void handle(long now) {
-                LocalTime currentTime = LocalTime.now(APP_ZONE_ID);
+                LocalTime currentTime = LocalTime.now(ZoneId.of("GMT+7"));
                 double rowHeight = 40;
                 double yPosition = rowHeight * currentTime.getHour() + (rowHeight * currentTime.getMinute() / 60.0);
                 yPosition += 40; // Shift down by "All Day" row
@@ -388,9 +388,7 @@ public class Calendar extends Application {
 
         updateEventsDisplay(hoursBox);
 
-        if (Tasks.sharedTasks != null) {
-            Tasks.sharedTasks.addListener((javafx.collections.ListChangeListener<LinkTasksAndCal>) c -> updateEventsDisplay(hoursBox));
-        }
+        Tasks.sharedTasks.addListener((javafx.collections.ListChangeListener<LinkTasksAndCalModel>) c -> updateEventsDisplay(hoursBox));
 
         return scrollPane;
     }
@@ -402,44 +400,44 @@ public class Calendar extends Application {
             eventsBox.getChildren().clear();
         }
 
-        if (Tasks.sharedTasks == null || Tasks.sharedTasks.isEmpty()) {
-            HBox allDayRow = (HBox) hoursBox.getChildren().get(0);
-            VBox allDayEventsBox = (VBox) allDayRow.getChildren().get(1);
-            Label noTasksLabel = new Label("No tasks available for this day.");
-            noTasksLabel.setFont(Font.font("Arial", 12));
-            noTasksLabel.setTextFill(Color.web("#A9B5BB"));
-            allDayEventsBox.getChildren().add(noTasksLabel);
-            return;
-        }
-
-        for (LinkTasksAndCal task : Tasks.sharedTasks) {
-            if (task == null || task.getStartTime() == null || !task.getStartTime().toLocalDate().equals(currentDate)) {
+        for (LinkTasksAndCalModel linkTasksAndCal : Tasks.sharedTasks) {
+            if (linkTasksAndCal == null || linkTasksAndCal.getStartTime() == null || !linkTasksAndCal.getStartTime().toLocalDate().equals(currentDate)) {
                 continue;
             }
 
             VBox targetEventsBox;
-            if (task.getStartTime().toLocalTime().equals(LocalTime.MIDNIGHT) || task.getStartTime().toLocalTime().equals(LocalTime.of(0, 0))) {
+            if (linkTasksAndCal.getStartTime().toLocalTime().equals(LocalTime.MIDNIGHT) || linkTasksAndCal.getStartTime().toLocalTime().equals(LocalTime.of(0, 0))) {
                 HBox allDayRow = (HBox) hoursBox.getChildren().get(0);
                 targetEventsBox = (VBox) allDayRow.getChildren().get(1);
             } else {
-                int hour = task.getStartTime().toLocalTime().getHour();
+                int hour = linkTasksAndCal.getStartTime().toLocalTime().getHour();
                 HBox hourRow = (HBox) hoursBox.getChildren().get(hour + 1);
                 targetEventsBox = (VBox) hourRow.getChildren().get(1);
             }
 
-            HBox compactView = createCompactTaskView(task, targetEventsBox);
+            HBox compactView = createCompactTaskView(linkTasksAndCal, targetEventsBox);
             targetEventsBox.getChildren().add(compactView);
         }
     }
 
-    private HBox createCompactTaskView(LinkTasksAndCal task, VBox targetEventsBox) {
+    private HBox createCompactTaskView(LinkTasksAndCalModel linkTasksAndCal, VBox targetEventsBox) {
         HBox compactView = new HBox(3);
         compactView.setPadding(new Insets(1));
         compactView.setBackground(new Background(new BackgroundFill(Color.web("#F5F8FA"), new CornerRadii(4), null)));
         compactView.setBorder(new Border(new BorderStroke(Color.web("#E0ECEF"), BorderStrokeStyle.SOLID, new CornerRadii(4), new BorderWidths(1))));
         compactView.setEffect(new DropShadow(2, 0, 1, Color.gray(0.1)));
+        compactView.setAlignment(Pos.CENTER_LEFT);
 
-        Label titleLabel = new Label(task.getTitle() + " [" + task.getPriority() + "]");
+        // Add checkbox for marking task as completed
+        CheckBox completedCheckBox = new CheckBox();
+        completedCheckBox.setSelected(linkTasksAndCal.isCompleted());
+        completedCheckBox.setOnAction(e -> {
+            linkTasksAndCal.setCompleted(completedCheckBox.isSelected());
+            updateEventsDisplay((VBox) ((HBox) targetEventsBox.getParent()).getParent());
+        });
+        completedCheckBox.setStyle("-fx-padding: 2;");
+
+        Label titleLabel = new Label(linkTasksAndCal.getTitle() + " [" + linkTasksAndCal.getPriority() + "]");
         titleLabel.setFont(Font.font("Arial", FontWeight.BOLD, 10));
         titleLabel.setTextFill(Color.web("#2D3E50"));
         titleLabel.setWrapText(true);
@@ -448,7 +446,7 @@ public class Calendar extends Application {
         HBox.setHgrow(titleLabel, Priority.ALWAYS);
 
         Label timeLabel = new Label();
-        String timeText = task.getStartTime() != null ? timeFormatter.format(task.getStartTime()) : "";
+        String timeText = linkTasksAndCal.getStartTime() != null ? timeFormatter.format(linkTasksAndCal.getStartTime()) : "";
         timeLabel.setText(timeText);
         timeLabel.setFont(Font.font("Arial", 8));
         timeLabel.setTextFill(Color.web("#2D3E50"));
@@ -457,52 +455,38 @@ public class Calendar extends Application {
         timeLabel.setMaxWidth(150);
         HBox.setHgrow(timeLabel, Priority.NEVER);
 
-        compactView.getChildren().addAll(titleLabel, timeLabel);
+        compactView.getChildren().addAll(completedCheckBox, titleLabel, timeLabel);
 
         ContextMenu contextMenu = new ContextMenu();
         MenuItem editItem = new MenuItem("Edit");
         MenuItem deleteItem = new MenuItem("Delete");
         MenuItem moveToTaskListItem = new MenuItem("Move to Task List");
 
-        Tasks mainAppInstance = new Tasks();
-
         editItem.setOnAction(e -> {
             if (Tasks.getMainStage() == null) {
+                Tasks mainApp = new Tasks();
                 Stage mainStage = new Stage();
-                mainAppInstance.start(mainStage);
+                mainApp.start(mainStage);
             }
-            mainAppInstance.showAddEditTaskDialog(task);
+            new Tasks().showAddEditTaskDialog(linkTasksAndCal);
         });
 
         deleteItem.setOnAction(e -> {
-            try {
-                mainAppInstance.deleteTask(task.getId()); // Đồng bộ với cơ sở dữ liệu
-                Tasks.sharedTasks.remove(task);
-                updateEventsDisplay((VBox) ((HBox) targetEventsBox.getParent()).getParent());
-            } catch (SQLException ex) {
-                mainAppInstance.showAlert("Database Error", "Failed to delete task: " + ex.getMessage());
-                ex.printStackTrace();
-            }
+            Tasks.sharedTasks.remove(linkTasksAndCal);
         });
 
         moveToTaskListItem.setOnAction(e -> {
-            task.setStartTime(null);
-            task.setEndTime(null);
-            try {
-                mainAppInstance.saveTask(task); // Đồng bộ với cơ sở dữ liệu
-                updateEventsDisplay((VBox) ((HBox) targetEventsBox.getParent()).getParent());
-            } catch (SQLException ex) {
-                mainAppInstance.showAlert("Database Error", "Failed to move task to task list: " + ex.getMessage());
-                ex.printStackTrace();
-            }
+            linkTasksAndCal.setStartTime(null);
+            linkTasksAndCal.setEndTime(null);
+            updateEventsDisplay((VBox) ((HBox) targetEventsBox.getParent()).getParent());
         });
 
         contextMenu.getItems().addAll(editItem, deleteItem, moveToTaskListItem);
 
         compactView.setOnMouseClicked(e -> {
-            if (e.getButton() == MouseButton.PRIMARY) {
+            if (e.getButton() == MouseButton.PRIMARY && e.getClickCount() == 1) {
                 int index = targetEventsBox.getChildren().indexOf(compactView);
-                targetEventsBox.getChildren().set(index, createDetailedTaskView(task, targetEventsBox));
+                targetEventsBox.getChildren().set(index, createDetailedTaskView(linkTasksAndCal, targetEventsBox));
             } else if (e.getButton() == MouseButton.SECONDARY) {
                 contextMenu.show(compactView, e.getScreenX(), e.getScreenY());
             }
@@ -511,7 +495,7 @@ public class Calendar extends Application {
         compactView.setOnDragDetected(event -> {
             Dragboard db = compactView.startDragAndDrop(TransferMode.MOVE);
             ClipboardContent content = new ClipboardContent();
-            content.putString(task.getId());
+            content.putString(String.valueOf(linkTasksAndCal.getId()));
             db.setContent(content);
             event.consume();
         });
@@ -530,28 +514,42 @@ public class Calendar extends Application {
         return compactView;
     }
 
-    private VBox createDetailedTaskView(LinkTasksAndCal task, VBox targetEventsBox) {
+    private VBox createDetailedTaskView(LinkTasksAndCalModel linkTasksAndCalsk, VBox targetEventsBox) {
         VBox detailedView = new VBox(1);
         detailedView.setPadding(new Insets(2));
         detailedView.setBackground(new Background(new BackgroundFill(Color.web("#F5F8FA"), new CornerRadii(4), null)));
         detailedView.setBorder(new Border(new BorderStroke(Color.web("#E0ECEF"), BorderStrokeStyle.SOLID, new CornerRadii(4), new BorderWidths(1))));
         detailedView.setEffect(new DropShadow(2, 0, 1, Color.gray(0.1)));
 
-        Label titleLabel = new Label(task.getTitle() + " [" + task.getPriority() + "]");
+        HBox headerBox = new HBox(3);
+        headerBox.setAlignment(Pos.CENTER_LEFT);
+
+        // Add checkbox for marking task as completed
+        CheckBox completedCheckBox = new CheckBox();
+        completedCheckBox.setSelected(linkTasksAndCalsk.isCompleted());
+        completedCheckBox.setOnAction(e -> {
+            linkTasksAndCalsk.setCompleted(completedCheckBox.isSelected());
+            updateEventsDisplay((VBox) ((HBox) targetEventsBox.getParent()).getParent());
+        });
+        completedCheckBox.setStyle("-fx-padding: 2;");
+
+        Label titleLabel = new Label(linkTasksAndCalsk.getTitle() + " [" + linkTasksAndCalsk.getPriority() + "]");
         titleLabel.setFont(Font.font("Arial", FontWeight.BOLD, 10));
         titleLabel.setTextFill(Color.web("#2D3E50"));
         titleLabel.setWrapText(true);
         titleLabel.setPrefWidth(400);
         titleLabel.setMaxWidth(400);
 
+        headerBox.getChildren().addAll(completedCheckBox, titleLabel);
+
         Label timeLabel = new Label();
         String timeText = "";
-        if (task.getStartTime() != null && task.getEndTime() != null) {
-            timeText = timeFormatter.format(task.getStartTime()) + " - " + timeFormatter.format(task.getEndTime());
-            timeLabel.setTextFill(LocalDateTime.now(APP_ZONE_ID).isAfter(task.getEndTime()) && !task.isCompleted() ? Color.RED : Color.web("#2D3E50"));
-        } else if (task.getEndTime() != null) {
-            timeText = "Hết hạn: " + timeFormatter.format(task.getEndTime());
-            timeLabel.setTextFill(LocalDateTime.now(APP_ZONE_ID).isAfter(task.getEndTime()) && !task.isCompleted() ? Color.RED : Color.web("#2D3E50"));
+        if (linkTasksAndCalsk.getStartTime() != null && linkTasksAndCalsk.getEndTime() != null) {
+            timeText = timeFormatter.format(linkTasksAndCalsk.getStartTime()) + " - " + timeFormatter.format(linkTasksAndCalsk.getEndTime());
+            timeLabel.setTextFill(LocalDateTime.now().isAfter(linkTasksAndCalsk.getEndTime()) && !linkTasksAndCalsk.isCompleted() ? Color.RED : Color.web("#2D3E50"));
+        } else if (linkTasksAndCalsk.getEndTime() != null) {
+            timeText = "Hết hạn: " + timeFormatter.format(linkTasksAndCalsk.getEndTime());
+            timeLabel.setTextFill(LocalDateTime.now().isAfter(linkTasksAndCalsk.getEndTime()) && !linkTasksAndCalsk.isCompleted() ? Color.RED : Color.web("#2D3E50"));
         }
         timeLabel.setText(timeText);
         timeLabel.setFont(Font.font("Arial", 8));
@@ -560,59 +558,45 @@ public class Calendar extends Application {
         timeLabel.setPrefWidth(150);
         timeLabel.setMaxWidth(150);
 
-        Label descriptionLabel = new Label(task.getDescription());
+        Label descriptionLabel = new Label(linkTasksAndCalsk.getDescription());
         descriptionLabel.setFont(Font.font("Arial", 8));
         descriptionLabel.setTextFill(Color.web("#2D3E50"));
         descriptionLabel.setWrapText(true);
         descriptionLabel.setPrefWidth(400);
         descriptionLabel.setMaxWidth(400);
 
-        detailedView.getChildren().addAll(titleLabel, timeLabel, descriptionLabel);
+        detailedView.getChildren().addAll(headerBox, timeLabel, descriptionLabel);
 
         ContextMenu contextMenu = new ContextMenu();
         MenuItem editItem = new MenuItem("Edit");
         MenuItem deleteItem = new MenuItem("Delete");
         MenuItem moveToTaskListItem = new MenuItem("Move to Task List");
 
-        Tasks mainAppInstance = new Tasks();
-
         editItem.setOnAction(e -> {
             if (Tasks.getMainStage() == null) {
+                Tasks mainApp = new Tasks();
                 Stage mainStage = new Stage();
-                mainAppInstance.start(mainStage);
+                mainApp.start(mainStage);
             }
-            mainAppInstance.showAddEditTaskDialog(task);
+            new Tasks().showAddEditTaskDialog(linkTasksAndCalsk);
         });
 
         deleteItem.setOnAction(e -> {
-            try {
-                mainAppInstance.deleteTask(task.getId()); // Đồng bộ với cơ sở dữ liệu
-                Tasks.sharedTasks.remove(task);
-                updateEventsDisplay((VBox) ((HBox) targetEventsBox.getParent()).getParent());
-            } catch (SQLException ex) {
-                mainAppInstance.showAlert("Database Error", "Failed to delete task: " + ex.getMessage());
-                ex.printStackTrace();
-            }
+            Tasks.sharedTasks.remove(linkTasksAndCalsk);
         });
 
         moveToTaskListItem.setOnAction(e -> {
-            task.setStartTime(null);
-            task.setEndTime(null);
-            try {
-                mainAppInstance.saveTask(task); // Đồng bộ với cơ sở dữ liệu
-                updateEventsDisplay((VBox) ((HBox) targetEventsBox.getParent()).getParent());
-            } catch (SQLException ex) {
-                mainAppInstance.showAlert("Database Error", "Failed to move task to task list: " + ex.getMessage());
-                ex.printStackTrace();
-            }
+            linkTasksAndCalsk.setStartTime(null);
+            linkTasksAndCalsk.setEndTime(null);
+            updateEventsDisplay((VBox) ((HBox) targetEventsBox.getParent()).getParent());
         });
 
         contextMenu.getItems().addAll(editItem, deleteItem, moveToTaskListItem);
 
         detailedView.setOnMouseClicked(e -> {
-            if (e.getButton() == MouseButton.PRIMARY) {
+            if (e.getButton() == MouseButton.PRIMARY && e.getClickCount() == 1) {
                 int index = targetEventsBox.getChildren().indexOf(detailedView);
-                targetEventsBox.getChildren().set(index, createCompactTaskView(task, targetEventsBox));
+                targetEventsBox.getChildren().set(index, createCompactTaskView(linkTasksAndCalsk, targetEventsBox));
             } else if (e.getButton() == MouseButton.SECONDARY) {
                 contextMenu.show(detailedView, e.getScreenX(), e.getScreenY());
             }
@@ -621,7 +605,7 @@ public class Calendar extends Application {
         detailedView.setOnDragDetected(event -> {
             Dragboard db = detailedView.startDragAndDrop(TransferMode.MOVE);
             ClipboardContent content = new ClipboardContent();
-            content.putString(task.getId());
+            content.putString(String.valueOf(linkTasksAndCalsk.getId()));
             db.setContent(content);
             event.consume();
         });
