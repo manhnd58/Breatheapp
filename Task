@@ -1,156 +1,753 @@
 package application;
 
+import javafx.animation.KeyFrame;
+import javafx.animation.Timeline;
+import javafx.application.Application;
 import javafx.beans.property.*;
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
+import javafx.geometry.HPos;
+import javafx.geometry.Insets;
+import javafx.geometry.Pos;
+import javafx.scene.Node;
+import javafx.scene.Scene;
+import javafx.scene.control.*;
+import javafx.scene.effect.DropShadow;
+import javafx.scene.image.Image;
+import javafx.scene.input.*;
+import javafx.scene.layout.*;
+import javafx.scene.paint.Color;
+import javafx.scene.text.Font;
+import javafx.scene.text.FontWeight;
+import javafx.scene.text.Text;
+import javafx.stage.Modality;
+import javafx.stage.Stage;
+import javafx.util.Duration;
 import java.time.LocalDateTime;
-import java.util.UUID;
+import java.time.format.DateTimeFormatter;
 
-public class LinkTasksAndCal {
-    private final StringProperty title = new SimpleStringProperty("");
-    private final StringProperty description = new SimpleStringProperty("");
-    private final ObjectProperty<LocalDateTime> startTime = new SimpleObjectProperty<>();
-    private final ObjectProperty<LocalDateTime> endTime = new SimpleObjectProperty<>();
-    private final LongProperty duration = new SimpleLongProperty(0); // Duration in minutes
-    private final IntegerProperty timeSpentHours = new SimpleIntegerProperty(0);
-    private final IntegerProperty timeSpentMinutes = new SimpleIntegerProperty(0);
-    private final StringProperty recurrence = new SimpleStringProperty("Does not repeat");
-    private final BooleanProperty completed = new SimpleBooleanProperty(false);
-    private final StringProperty priority = new SimpleStringProperty("Medium"); // Thêm priority
-    private String id;
+public class Tasks extends Application {
 
-    public LinkTasksAndCal(String title, LocalDateTime startTime, LocalDateTime endTime, boolean completed) {
-        this.title.set(title);
-        this.startTime.set(startTime);
-        this.endTime.set(endTime);
-        this.completed.set(completed);
-        this.id = UUID.randomUUID().toString();
+    public static ObservableList<LinkTasksAndCal> sharedTasks = FXCollections.observableArrayList();
+    private static Stage mainStage;
+    private ListView<LinkTasksAndCal> taskListView = new ListView<>(sharedTasks);
+    private ProgressBar completionProgressBar = new ProgressBar(0);
+    private Label completionLabel = new Label("0/0");
+    private DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm dd/MM/yyyy", new java.util.Locale("vi", "VN"));
+    private CalendarApp calendarApp; // Changed to CalendarApp
+    private VBox notificationArea;
+
+    @Override
+    public void start(Stage primaryStage) {
+        mainStage = primaryStage;
+        primaryStage.setTitle("Study Task Manager");
+
+        BorderPane mainLayout = new BorderPane();
+        mainLayout.setPadding(new Insets(10));
+        mainLayout.setBackground(new Background(new BackgroundFill(Color.web("#E0ECEF"), null, null)));
+
+        mainLayout.setTop(createFilterBar());
+        VBox centerLayout = new VBox(10);
+        centerLayout.setPadding(new Insets(10));
+        notificationArea = createNotificationArea();
+        
+        TextField searchField = new TextField();
+        searchField.setPromptText("Search tasks...");
+        searchField.setStyle("-fx-background-color: #F5F8FA; -fx-border-color: #B0BEC5; -fx-border-radius: 4; -fx-padding: 8;");
+        searchField.textProperty().addListener((obs, oldVal, newVal) -> {
+            taskListView.setItems(sharedTasks.filtered(task ->
+                    task.getTitle().toLowerCase().contains(newVal.toLowerCase()) ||
+                            task.getDescription().toLowerCase().contains(newVal.toLowerCase())));
+        });
+        centerLayout.getChildren().addAll(searchField, notificationArea, taskListView, createProgressBarAndLabel());
+        mainLayout.setCenter(centerLayout);
+
+        taskListView.setCellFactory(param -> new TaskListCell());
+        updateCompletionProgress();
+        setupNotificationCheck();
+
+        // Drag and drop handling
+        taskListView.setOnDragDetected(event -> {
+            LinkTasksAndCal selected = taskListView.getSelectionModel().getSelectedItem();
+            if (selected == null) return;
+            
+            Dragboard db = taskListView.startDragAndDrop(TransferMode.MOVE);
+            ClipboardContent content = new ClipboardContent();
+            content.putString(selected.getId());
+            db.setContent(content);
+            event.consume();
+        });
+
+        taskListView.setOnDragOver(event -> {
+            if (event.getDragboard().hasString()) {
+                event.acceptTransferModes(TransferMode.MOVE);
+            }
+            event.consume();
+        });
+
+        taskListView.setOnDragDropped(event -> {
+            Dragboard db = event.getDragboard();
+            boolean success = false;
+            if (db.hasString()) {
+                String taskId = db.getString();
+                LinkTasksAndCal draggedTask = sharedTasks.stream()
+                        .filter(t -> t.getId().equals(taskId))
+                        .findFirst()
+                        .orElse(null);
+                if (draggedTask != null) {
+                    int draggedIndex = sharedTasks.indexOf(draggedTask);
+                    int dropIndex = taskListView.getItems().indexOf(
+                            event.getGestureTarget() instanceof TaskListCell ? 
+                            ((TaskListCell) event.getGestureTarget()).getItem() : draggedTask);
+
+                    if (dropIndex < 0 || dropIndex >= sharedTasks.size()) {
+                        dropIndex = sharedTasks.size() - 1;
+                    }
+
+                    sharedTasks.remove(draggedIndex);
+                    sharedTasks.add(dropIndex, draggedTask);
+                    success = true;
+                }
+            }
+            event.setDropCompleted(success);
+            event.consume();
+        });
+
+        taskListView.setOnDragDone(DragEvent::consume);
+
+        Scene scene = new Scene(mainLayout, 600, 600);
+        scene.setOnKeyPressed(e -> {
+            if (e.getCode() == KeyCode.N && e.isControlDown()) {
+                showAddEditTaskDialog(null);
+            }
+        });
+        primaryStage.setScene(scene);
+        primaryStage.centerOnScreen();
+        primaryStage.setOnCloseRequest(e -> mainStage = null);
+
+        initIcon(primaryStage);
+        primaryStage.show();
     }
 
-    public String getId() {
-        return id;
+    private void initIcon(Stage stage) {
+        try {
+            Image image = new Image(getClass().getResourceAsStream("/IconsTasks.png"));
+            stage.getIcons().add(image);
+        } catch (Exception e) {
+            System.err.println("Error loading icon: " + e.getMessage());
+        }
     }
 
-    public void setId(String id) {
-        this.id = id;
+    private VBox createNotificationArea() {
+        VBox notificationBox = new VBox(5);
+        notificationBox.setPadding(new Insets(10));
+        notificationBox.setBackground(new Background(new BackgroundFill(Color.web("#FFF3E0"), new CornerRadii(8), null)));
+        notificationBox.setBorder(new Border(new BorderStroke(Color.web("#FFCA28"), BorderStrokeStyle.SOLID, new CornerRadii(8), new BorderWidths(1))));
+        notificationBox.setVisible(false);
+        return notificationBox;
     }
 
-    public String getTitle() {
-        return title.get();
+    private void setupNotificationCheck() {
+        checkOverdueTasks();
+        Timeline timeline = new Timeline(new KeyFrame(Duration.minutes(5), e -> checkOverdueTasks()));
+        timeline.setCycleCount(Timeline.INDEFINITE);
+        timeline.play();
     }
 
-    public StringProperty titleProperty() {
-        return title;
+    private void checkOverdueTasks() {
+        notificationArea.getChildren().clear();
+        boolean hasOverdue = false;
+        for (LinkTasksAndCal task : sharedTasks) {
+            if (task.getEndTime() != null && LocalDateTime.now().isAfter(task.getEndTime()) && !task.isCompleted()) {
+                HBox notification = new HBox(10);
+                Label message = new Label("Overdue: " + task.getTitle() + " (Due: " + dateTimeFormatter.format(task.getEndTime()) + ")");
+                message.setFont(Font.font("Arial", 12));
+                message.setTextFill(Color.web("#D32F2F"));
+                Button actionButton = new Button("Edit");
+                styleButton(actionButton, "#4C7C8A", "#FFFFFF", 4);
+                actionButton.setOnAction(e -> showAddEditTaskDialog(task));
+                notification.getChildren().addAll(message, actionButton);
+                notificationArea.getChildren().add(notification);
+                hasOverdue = true;
+            }
+        }
+        notificationArea.setVisible(hasOverdue);
+        if (hasOverdue && mainStage != null && !mainStage.isFocused()) {
+            mainStage.requestFocus();
+        }
     }
 
-    public void setTitle(String title) {
-        this.title.set(title);
+    private HBox createFilterBar() {
+        HBox filterBar = new HBox(10);
+        filterBar.setAlignment(Pos.CENTER_LEFT);
+        filterBar.setPadding(new Insets(15));
+        filterBar.setBackground(new Background(new BackgroundFill(Color.web("#4C7C8A"), null, null)));
+        filterBar.setEffect(new DropShadow(10, 0, 2, Color.gray(0.1)));
+
+        Label titleLabel = new Label("Task Manager");
+        titleLabel.setFont(Font.font("Arial", FontWeight.BOLD, 20));
+        titleLabel.setTextFill(Color.WHITE);
+
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+
+        ComboBox<String> sortCombo = new ComboBox<>();
+        sortCombo.getItems().addAll("Default", "By Title", "By Deadline", "By Priority");
+        sortCombo.setValue("Default");
+        styleComboBox(sortCombo);
+        sortCombo.setOnAction(e -> sortTasks(sortCombo.getValue()));
+
+        Button calendarButton = new Button("View Calendar");
+        styleButton(calendarButton, "#4C7C8A", "#FFFFFF", 8);
+        calendarButton.setOnAction(e -> showCalendar());
+
+        Button addButton = new Button("+");
+        addButton.setFont(Font.font("Arial", FontWeight.BOLD, 14));
+        addButton.setBackground(new Background(new BackgroundFill(Color.web("#4C7C8A"), new CornerRadii(50), null)));
+        addButton.setTextFill(Color.WHITE);
+        addButton.setPrefSize(30, 30);
+        addButton.setAlignment(Pos.CENTER);
+        addButton.setEffect(new DropShadow(5, 0, 1, Color.gray(0.2)));
+
+        addButton.setOnMouseEntered(e -> {
+            addButton.setBackground(new Background(new BackgroundFill(Color.web("#355B66"), new CornerRadii(50), null)));
+            addButton.setScaleX(1.05);
+            addButton.setScaleY(1.05);
+        });
+        addButton.setOnMouseExited(e -> {
+            addButton.setBackground(new Background(new BackgroundFill(Color.web("#4C7C8A"), new CornerRadii(50), null)));
+            addButton.setScaleX(1.0);
+            addButton.setScaleY(1.0);
+        });
+
+        addButton.setOnAction(e -> showAddEditTaskDialog(null));
+
+        filterBar.getChildren().addAll(titleLabel, spacer, sortCombo, calendarButton, addButton);
+        return filterBar;
     }
 
-    public String getDescription() {
-        return description.get();
+    private void showCalendar() {
+        if (CalendarApp.getCalendarStage() == null) {
+            calendarApp = new CalendarApp();
+            Stage calendarStage = new Stage();
+            calendarApp.start(calendarStage);
+        } else {
+            CalendarApp.getCalendarStage().toFront();
+        }
     }
 
-    public StringProperty descriptionProperty() {
-        return description;
+    private HBox createProgressBarAndLabel() {
+        HBox box = new HBox(10);
+        box.setAlignment(Pos.CENTER_RIGHT);
+        HBox.setHgrow(completionProgressBar, Priority.ALWAYS);
+
+        completionProgressBar.setStyle("-fx-accent: #4C7C8A; -fx-background-color: #F5F8FA; -fx-background-radius: 4;");
+        completionProgressBar.setPrefHeight(20);
+
+        completionLabel.setFont(Font.font("Arial", 14));
+        completionLabel.setTextFill(Color.web("#2D3E50"));
+
+        box.getChildren().addAll(completionProgressBar, completionLabel);
+        return box;
     }
 
-    public void setDescription(String description) {
-        this.description.set(description);
+    private void sortTasks(String sort) {
+        ObservableList<LinkTasksAndCal> sortedTasks = FXCollections.observableArrayList(taskListView.getItems());
+        switch (sort) {
+            case "By Title":
+                sortedTasks.sort((t1, t2) -> t1.getTitle().compareToIgnoreCase(t2.getTitle()));
+                break;
+            case "By Deadline":
+                sortedTasks.sort((t1, t2) -> {
+                    LocalDateTime d1 = t1.getEndTime() != null ? t1.getEndTime() : LocalDateTime.MAX;
+                    LocalDateTime d2 = t2.getEndTime() != null ? t2.getEndTime() : LocalDateTime.MAX;
+                    return d1.compareTo(d2);
+                });
+                break;
+            case "By Priority":
+                sortedTasks.sort((t1, t2) -> {
+                    int p1 = getPriorityValue(t1.getPriority());
+                    int p2 = getPriorityValue(t2.getPriority());
+                    return Integer.compare(p2, p1);
+                });
+                break;
+            default:
+                sortedTasks = FXCollections.observableArrayList(sharedTasks);
+                break;
+        }
+        taskListView.setItems(sortedTasks);
     }
 
-    public LocalDateTime getStartTime() {
-        return startTime.get();
+    private int getPriorityValue(String priority) {
+        switch (priority) {
+            case "High": return 3;
+            case "Medium": return 2;
+            case "Low": return 1;
+            default: return 2;
+        }
     }
 
-    public ObjectProperty<LocalDateTime> startTimeProperty() {
-        return startTime;
+    public void showAddEditTaskDialog(LinkTasksAndCal taskToEdit) {
+        Stage dialogStage = new Stage();
+        dialogStage.initModality(Modality.APPLICATION_MODAL);
+        dialogStage.setTitle(taskToEdit == null ? "Add Task" : "Edit Task");
+
+        initIconAddTasksAndEdit(dialogStage, taskToEdit != null);
+
+        TextField titleField = new TextField(taskToEdit != null ? taskToEdit.getTitle() : "");
+        titleField.setFont(Font.font("Arial", 14));
+        titleField.setPromptText("Enter task title");
+        styleTextField(titleField);
+
+        TextArea descriptionArea = new TextArea(taskToEdit != null ? taskToEdit.getDescription() : "");
+        descriptionArea.setFont(Font.font("Arial", 14));
+        descriptionArea.setPromptText("Add your task description");
+        descriptionArea.setStyle("-fx-background-color: #F5F8FA; -fx-border-color: #B0BEC5; -fx-border-radius: 4; -fx-padding: 8;");
+        descriptionArea.setPrefRowCount(3);
+        descriptionArea.focusedProperty().addListener((obs, oldVal, newVal) -> {
+            descriptionArea.setStyle(newVal ? 
+                "-fx-background-color: #F5F8FA; -fx-border-color: #4C7C8A; -fx-border-radius: 4; -fx-padding: 8;" :
+                "-fx-background-color: #F5F8FA; -fx-border-color: #B0BEC5; -fx-border-radius: 4; -fx-padding: 8;");
+        });
+
+        DatePicker startDatePicker = new DatePicker(taskToEdit != null && taskToEdit.getStartTime() != null ? 
+            taskToEdit.getStartTime().toLocalDate() : null);
+        Spinner<Integer> startHourSpinner = new Spinner<>(0, 23, taskToEdit != null && taskToEdit.getStartTime() != null ? 
+            taskToEdit.getStartTime().toLocalTime().getHour() : 0);
+        Spinner<Integer> startMinuteSpinner = new Spinner<>(0, 59, taskToEdit != null && taskToEdit.getStartTime() != null ? 
+            taskToEdit.getStartTime().toLocalTime().getMinute() : 0);
+        DatePicker endDatePicker = new DatePicker(taskToEdit != null && taskToEdit.getEndTime() != null ? 
+            taskToEdit.getEndTime().toLocalDate() : null);
+        Spinner<Integer> endHourSpinner = new Spinner<>(0, 23, taskToEdit != null && taskToEdit.getEndTime() != null ? 
+            taskToEdit.getEndTime().toLocalTime().getHour() : 23);
+        Spinner<Integer> endMinuteSpinner = new Spinner<>(0, 59, taskToEdit != null && taskToEdit.getEndTime() != null ? 
+            taskToEdit.getEndTime().toLocalTime().getMinute() : 59);
+
+        startHourSpinner.setPrefWidth(80);
+        startMinuteSpinner.setPrefWidth(80);
+        endHourSpinner.setPrefWidth(80);
+        endMinuteSpinner.setPrefWidth(80);
+        startHourSpinner.setEditable(true);
+        startMinuteSpinner.setEditable(true);
+        endHourSpinner.setEditable(true);
+        endMinuteSpinner.setEditable(true);
+        styleSpinner(startHourSpinner);
+        styleSpinner(startMinuteSpinner);
+        styleSpinner(endHourSpinner);
+        styleSpinner(endMinuteSpinner);
+
+        addSpinnerValidation(startHourSpinner, 0, 23);
+        addSpinnerValidation(startMinuteSpinner, 0, 59);
+        addSpinnerValidation(endHourSpinner, 0, 23);
+        addSpinnerValidation(endMinuteSpinner, 0, 59);
+
+        Label deadlineLabel = new Label("Deadline");
+
+        Spinner<Integer> durationSpinner = new Spinner<>(0, 1440, taskToEdit != null ? (int) taskToEdit.getDuration() : 0);
+        durationSpinner.setPrefWidth(100);
+        durationSpinner.setEditable(true);
+        styleSpinner(durationSpinner);
+        addSpinnerValidation(durationSpinner, 0, 1440);
+        Label durationUnitLabel = new Label("mins");
+
+        Spinner<Integer> timeSpentHoursSpinner = new Spinner<>(0, 23, taskToEdit != null ? taskToEdit.getTimeSpentHours() : 0);
+        Spinner<Integer> timeSpentMinutesSpinner = new Spinner<>(0, 59, taskToEdit != null ? taskToEdit.getTimeSpentMinutes() : 0);
+        timeSpentHoursSpinner.setPrefWidth(80);
+        timeSpentMinutesSpinner.setPrefWidth(80);
+        timeSpentHoursSpinner.setEditable(true);
+        timeSpentMinutesSpinner.setEditable(true);
+        styleSpinner(timeSpentHoursSpinner);
+        styleSpinner(timeSpentMinutesSpinner);
+        addSpinnerValidation(timeSpentHoursSpinner, 0, 23);
+        addSpinnerValidation(timeSpentMinutesSpinner, 0, 59);
+        Label timeSpentHoursLabel = new Label("hr");
+        Label timeSpentMinutesLabel = new Label("mins");
+
+        ComboBox<String> recurrenceCombo = new ComboBox<>();
+        recurrenceCombo.getItems().addAll("Does not repeat", "Daily", "Weekly", "Monthly");
+        recurrenceCombo.setValue(taskToEdit != null ? taskToEdit.getRecurrence() : "Does not repeat");
+        styleComboBox(recurrenceCombo);
+
+        ComboBox<String> priorityCombo = new ComboBox<>();
+        priorityCombo.getItems().addAll("High", "Medium", "Low");
+        priorityCombo.setValue(taskToEdit != null ? taskToEdit.getPriority() : "Medium");
+        styleComboBox(priorityCombo);
+
+        CheckBox completedCheckBox = new CheckBox("Completed");
+        completedCheckBox.setSelected(taskToEdit != null && taskToEdit.isCompleted());
+
+        Button saveButton = new Button("Save");
+        styleButton(saveButton, "#4C7C8A", "#FFFFFF", 8);
+        Button cancelButton = new Button("Cancel");
+        styleButton(cancelButton, "#4C7C8A", "#FFFFFF", 8);
+        Button deleteButton = new Button("Delete task");
+        styleButton(deleteButton, "#FF4C4C", "#FFFFFF", 8);
+        deleteButton.setVisible(taskToEdit != null);
+
+        saveButton.setOnAction(e -> {
+            String title = titleField.getText().trim();
+            if (title.isEmpty()) {
+                showAlert("Error", "Please enter a task title.");
+                return;
+            }
+            if (taskToEdit == null && sharedTasks.stream().anyMatch(t -> t.getTitle().equalsIgnoreCase(title))) {
+                showAlert("Error", "A task with this title already exists.");
+                return;
+            }
+
+            LocalDateTime startTime = startDatePicker.getValue() != null ?
+                    startDatePicker.getValue().atTime(startHourSpinner.getValue(), startMinuteSpinner.getValue()) : null;
+            LocalDateTime endTime = endDatePicker.getValue() != null ?
+                    endDatePicker.getValue().atTime(endHourSpinner.getValue(), endMinuteSpinner.getValue()) : null;
+
+            if (startTime != null && endTime != null && endTime.isBefore(startTime)) {
+                showAlert("Error", "End time cannot be before start time.");
+                return;
+            }
+
+            if (taskToEdit == null) {
+                LinkTasksAndCal newTask = new LinkTasksAndCal(title, startTime, endTime, completedCheckBox.isSelected());
+                newTask.setDescription(descriptionArea.getText());
+                newTask.setDuration(durationSpinner.getValue());
+                newTask.setTimeSpentHours(timeSpentHoursSpinner.getValue());
+                newTask.setTimeSpentMinutes(timeSpentMinutesSpinner.getValue());
+                newTask.setRecurrence(recurrenceCombo.getValue());
+                newTask.setPriority(priorityCombo.getValue());
+                sharedTasks.add(newTask);
+            } else {
+                taskToEdit.setTitle(title);
+                taskToEdit.setDescription(descriptionArea.getText());
+                taskToEdit.setStartTime(startTime);
+                taskToEdit.setEndTime(endTime);
+                taskToEdit.setDuration(durationSpinner.getValue());
+                taskToEdit.setTimeSpentHours(timeSpentHoursSpinner.getValue());
+                taskToEdit.setTimeSpentMinutes(timeSpentMinutesSpinner.getValue());
+                taskToEdit.setRecurrence(recurrenceCombo.getValue());
+                taskToEdit.setPriority(priorityCombo.getValue());
+                taskToEdit.setCompleted(completedCheckBox.isSelected());
+            }
+            updateCompletionProgress();
+            checkOverdueTasks();
+            if (startTime != null && calendarApp != null) {
+                calendarApp.setCurrentDate(startTime.toLocalDate());
+            }
+            dialogStage.close();
+        });
+
+        cancelButton.setOnAction(e -> dialogStage.close());
+
+        deleteButton.setOnAction(e -> {
+            if (taskToEdit != null) {
+                sharedTasks.remove(taskToEdit);
+                updateCompletionProgress();
+                checkOverdueTasks();
+                dialogStage.close();
+            }
+        });
+
+        GridPane grid = new GridPane();
+        grid.setHgap(10);
+        grid.setVgap(10);
+        grid.setPadding(new Insets(20));
+        grid.setBackground(new Background(new BackgroundFill(Color.web("#F5F8FA"), null, null)));
+        grid.setEffect(new DropShadow(10, 0, 2, Color.gray(0.2)));
+
+        int row = 0;
+        grid.addRow(row++, new Label("Title:"), titleField);
+        grid.addRow(row++, new Label("Description:"), descriptionArea);
+        grid.addRow(row++, new Label("Start:"), new HBox(5, startDatePicker, startHourSpinner, new Label(":"), startMinuteSpinner));
+        grid.addRow(row++, deadlineLabel, new HBox(5, endDatePicker, endHourSpinner, new Label(":"), endMinuteSpinner));
+        grid.addRow(row++, new Label("Duration:"), new HBox(5, durationSpinner, durationUnitLabel));
+        grid.addRow(row++, new Label("Time spent:"), new HBox(5, timeSpentHoursSpinner, timeSpentHoursLabel, timeSpentMinutesSpinner, timeSpentMinutesLabel));
+        grid.addRow(row++, new Label("Recurrence:"), recurrenceCombo);
+        grid.addRow(row++, new Label("Priority:"), priorityCombo);
+        grid.addRow(row++, new Label("Status:"), completedCheckBox);
+        grid.addRow(row++, deleteButton, new HBox(5, saveButton, cancelButton));
+
+        GridPane.setColumnSpan(titleField, 2);
+        GridPane.setColumnSpan(descriptionArea, 2);
+        GridPane.setHalignment(saveButton, HPos.RIGHT);
+        GridPane.setHalignment(cancelButton, HPos.RIGHT);
+        GridPane.setHalignment(deleteButton, HPos.LEFT);
+
+        for (Node node : grid.getChildren()) {
+            if (node instanceof Label) {
+                Label label = (Label) node;
+                label.setFont(Font.font("Arial", 14));
+                label.setTextFill(Color.web("#2D3E50"));
+            }
+        }
+
+        Scene dialogScene = new Scene(grid);
+        dialogStage.setScene(dialogScene);
+        dialogStage.showAndWait();
     }
 
-    public void setStartTime(LocalDateTime startTime) {
-        this.startTime.set(startTime);
+    private void initIconAddTasksAndEdit(Stage stage, boolean isEditMode) {
+        try {
+            String iconPath = isEditMode ? "/IconEditTasks.png" : "/IconAddTasks.png";
+            Image icon = new Image(getClass().getResourceAsStream(iconPath));
+            stage.getIcons().clear();
+            stage.getIcons().add(icon);
+        } catch (Exception e) {
+            System.err.println("Error: Icon file not found for " + (isEditMode ? "edit" : "add") + " mode");
+        }
     }
 
-    public LocalDateTime getEndTime() {
-        return endTime.get();
+    private void addSpinnerValidation(Spinner<Integer> spinner, int min, int max) {
+        TextField editor = spinner.getEditor();
+        editor.textProperty().addListener((obs, oldValue, newValue) -> {
+            try {
+                int value = Integer.parseInt(newValue);
+                if (value < min) {
+                    spinner.getValueFactory().setValue(min);
+                    editor.setText(String.valueOf(min));
+                } else if (value > max) {
+                    spinner.getValueFactory().setValue(max);
+                    editor.setText(String.valueOf(max));
+                }
+            } catch (NumberFormatException e) {
+                if (!newValue.isEmpty()) {
+                    spinner.getValueFactory().setValue(spinner.getValueFactory().getValue());
+                    editor.setText(String.valueOf(spinner.getValue()));
+                }
+            }
+        });
+        editor.setOnAction(e -> {
+            try {
+                int value = Integer.parseInt(editor.getText());
+                spinner.getValueFactory().setValue(Math.min(max, Math.max(min, value)));
+            } catch (NumberFormatException ex) {
+                editor.setText(String.valueOf(spinner.getValue()));
+            }
+        });
     }
 
-    public ObjectProperty<LocalDateTime> endTimeProperty() {
-        return endTime;
+    private void updateCompletionProgress() {
+        long completedCount = sharedTasks.stream().filter(LinkTasksAndCal::isCompleted).count();
+        completionProgressBar.setProgress(sharedTasks.isEmpty() ? 0 : (double) completedCount / sharedTasks.size());
+        completionLabel.setText(completedCount + "/" + sharedTasks.size());
+        checkOverdueTasks();
     }
 
-    public void setEndTime(LocalDateTime endTime) {
-        this.endTime.set(endTime);
+    private void showAlert(String title, String content) {
+        Alert alert = new Alert(Alert.AlertType.ERROR);
+        alert.setTitle(title);
+        alert.setHeaderText(null);
+        alert.setContentText(content);
+        alert.getDialogPane().setBackground(new Background(new BackgroundFill(Color.web("#F5F8FA"), null, null)));
+        alert.getDialogPane().setEffect(new DropShadow(10, 0, 2, Color.gray(0.2)));
+        alert.showAndWait();
     }
 
-    public long getDuration() {
-        return duration.get();
+    private void styleTextField(TextField textField) {
+        textField.setStyle("-fx-background-color: #F5F8FA; -fx-border-color: #B0BEC5; -fx-border-radius: 4; -fx-padding: 8;");
+        textField.focusedProperty().addListener((obs, oldVal, newVal) -> {
+            textField.setStyle(newVal ? 
+                "-fx-background-color: #F5F8FA; -fx-border-color: #4C7C8A; -fx-border-radius: 4; -fx-padding: 8;" :
+                "-fx-background-color: #F5F8FA; -fx-border-color: #B0BEC5; -fx-border-radius: 4; -fx-padding: 8;");
+        });
     }
 
-    public LongProperty durationProperty() {
-        return duration;
+    public static Stage getMainStage() {
+        return mainStage;
     }
 
-    public void setDuration(long duration) {
-        this.duration.set(duration);
+    public static void main(String[] args) {
+        launch(args);
     }
 
-    public int getTimeSpentHours() {
-        return timeSpentHours.get();
+    private class TaskListCell extends ListCell<LinkTasksAndCal> {
+        private final Label titleLabel = new Label();
+        private final Label timeLabel = new Label();
+        private final CheckBox completedCheckBox = new CheckBox();
+        private final VBox content = new VBox(5);
+        private final ContextMenu contextMenu = new ContextMenu();
+        private final MenuItem editItem = new MenuItem("Edit");
+        private final MenuItem duplicateItem = new MenuItem("Duplicate");
+        private final MenuItem deleteItem = new MenuItem("Delete");
+        private final MenuItem scheduleItem = new MenuItem("Schedule Task");
+
+        public TaskListCell() {
+            content.setPadding(new Insets(10));
+            content.setBackground(new Background(new BackgroundFill(Color.web("#F5F8FA"), new CornerRadii(8), null)));
+            content.setBorder(new Border(new BorderStroke(Color.web("#E0ECEF"), BorderStrokeStyle.SOLID, new CornerRadii(8), new BorderWidths(1))));
+            content.setEffect(new DropShadow(5, 0, 1, Color.gray(0.1)));
+
+            HBox header = new HBox(10, completedCheckBox, titleLabel);
+            header.setAlignment(Pos.CENTER_LEFT);
+            content.getChildren().addAll(header, timeLabel);
+
+            completedCheckBox.setOnAction(e -> {
+                LinkTasksAndCal task = getItem();
+                if (task != null) {
+                    task.setCompleted(completedCheckBox.isSelected());
+                    updateCompletionProgress();
+                    checkOverdueTasks(); // Update notifications
+                    // Update the calendar view if open
+                    if (calendarApp != null && CalendarApp.getCalendarStage() != null) {
+                        BorderPane root = (BorderPane) CalendarApp.getCalendarStage().getScene().getRoot();
+                        ScrollPane scrollPane = (ScrollPane) root.getCenter();
+                        StackPane contentPane = (StackPane) scrollPane.getContent();
+                        VBox hoursBox = (VBox) contentPane.getChildren().get(1);
+                        calendarApp.updateEventsDisplay(hoursBox);
+                    }
+                }
+            });
+
+            content.setOnMouseEntered(e -> {
+                content.setEffect(new DropShadow(10, 0, 2, Color.gray(0.2)));
+                content.setScaleX(1.01);
+                content.setScaleY(1.01);
+            });
+            content.setOnMouseExited(e -> {
+                content.setEffect(new DropShadow(5, 0, 1, Color.gray(0.1)));
+                content.setScaleX(1.0);
+                content.setScaleY(1.0);
+            });
+
+            contextMenu.getItems().addAll(editItem, duplicateItem, deleteItem, scheduleItem);
+            setOnMouseClicked(e -> {
+                if (!isEmpty() && e.getButton() == MouseButton.SECONDARY) {
+                    contextMenu.show(this, e.getScreenX(), e.getScreenY());
+                } else {
+                    contextMenu.hide();
+                }
+            });
+
+            editItem.setOnAction(e -> showAddEditTaskDialog(getItem()));
+            duplicateItem.setOnAction(e -> {
+                LinkTasksAndCal original = getItem();
+                if (original != null) {
+                    LinkTasksAndCal newTask = new LinkTasksAndCal(
+                        original.getTitle() + " (Copy)", 
+                        original.getStartTime(), 
+                        original.getEndTime(), 
+                        false
+                    );
+                    newTask.setDescription(original.getDescription());
+                    newTask.setDuration(original.getDuration());
+                    newTask.setTimeSpentHours(original.getTimeSpentHours());
+                    newTask.setTimeSpentMinutes(original.getTimeSpentMinutes());
+                    newTask.setRecurrence(original.getRecurrence());
+                    newTask.setPriority(original.getPriority());
+                    sharedTasks.add(newTask);
+                    updateCompletionProgress();
+                }
+            });
+            deleteItem.setOnAction(e -> {
+                LinkTasksAndCal task = getItem();
+                if (task != null) {
+                    sharedTasks.remove(task);
+                    updateCompletionProgress();
+                }
+            });
+            scheduleItem.setOnAction(e -> showAddEditTaskDialog(getItem()));
+
+            setOnDragOver(event -> {
+                if (event.getGestureSource() != this && event.getDragboard().hasString()) {
+                    event.acceptTransferModes(TransferMode.MOVE);
+                }
+                event.consume();
+            });
+
+            setOnDragDropped(event -> {
+                Dragboard db = event.getDragboard();
+                boolean success = false;
+                if (db.hasString()) {
+                    String taskId = db.getString();
+                    LinkTasksAndCal draggedTask = sharedTasks.stream()
+                            .filter(t -> t.getId().equals(taskId))
+                            .findFirst()
+                            .orElse(null);
+                    if (draggedTask != null) {
+                        int draggedIndex = sharedTasks.indexOf(draggedTask);
+                        int dropIndex = sharedTasks.indexOf(getItem());
+                        sharedTasks.remove(draggedIndex);
+                        sharedTasks.add(dropIndex, draggedTask);
+                        success = true;
+                    }
+                }
+                event.setDropCompleted(success);
+                event.consume();
+            });
+        }
+
+        @Override
+        protected void updateItem(LinkTasksAndCal task, boolean empty) {
+            super.updateItem(task, empty);
+            if (empty || task == null) {
+                setGraphic(null);
+                setContextMenu(null);
+            } else {
+                titleLabel.setText(task.getTitle() + " [" + task.getPriority() + "]");
+                titleLabel.setFont(Font.font("Arial", FontWeight.BOLD, 14));
+                titleLabel.setTextFill(Color.web("#2D3E50"));
+                // Strike through if completed
+                titleLabel.setStrikethrough(task.isCompleted());
+
+                completedCheckBox.setSelected(task.isCompleted());
+
+                String timeText = "";
+                boolean isOverdue = task.getEndTime() != null && 
+                                  LocalDateTime.now().isAfter(task.getEndTime()) && 
+                                  !task.isCompleted();
+                if (task.getStartTime() != null && task.getEndTime() != null) {
+                    timeText = dateTimeFormatter.format(task.getStartTime()) + " - " + 
+                             dateTimeFormatter.format(task.getEndTime());
+                } else if (task.getEndTime() != null) {
+                    timeText = "Due: " + dateTimeFormatter.format(task.getEndTime());
+                } else {
+                    timeText = "No scheduled time";
+                }
+                timeLabel.setText(timeText);
+                timeLabel.setFont(Font.font("Arial", 12));
+                timeLabel.setTextFill(isOverdue ? Color.RED : Color.web("#2D3E50"));
+
+                content.setBorder(new Border(new BorderStroke(
+                    isOverdue ? Color.RED : Color.web("#E0ECEF"),
+                    BorderStrokeStyle.SOLID,
+                    new CornerRadii(8),
+                    new BorderWidths(isOverdue ? 2 : 1)
+                )));
+
+                setGraphic(content);
+                setContextMenu(contextMenu);
+            }
+        }
     }
 
-    public IntegerProperty timeSpentHoursProperty() {
-        return timeSpentHours;
+    private void styleButton(Button button, String bgColor, String textColor, double radius) {
+        button.setFont(Font.font("Arial", 14));
+        button.setBackground(new Background(new BackgroundFill(Color.web(bgColor), new CornerRadii(radius), null)));
+        button.setTextFill(Color.web(textColor));
+        button.setPadding(new Insets(8, 16, 8, 16));
+        button.setEffect(new DropShadow(5, 0, 2, Color.gray(0.2)));
+
+        button.setOnMouseEntered(e -> {
+            button.setBackground(new Background(new BackgroundFill(Color.web("#355B66"), new CornerRadii(radius), null)));
+            button.setScaleX(1.05);
+            button.setScaleY(1.05);
+        });
+        button.setOnMouseExited(e -> {
+            button.setBackground(new Background(new BackgroundFill(Color.web(bgColor), new CornerRadii(radius), null)));
+            button.setScaleX(1.0);
+            button.setScaleY(1.0);
+        });
     }
 
-    public void setTimeSpentHours(int hours) {
-        this.timeSpentHours.set(hours);
+    private void styleComboBox(ComboBox<?> comboBox) {
+        comboBox.setStyle("-fx-background-color: #F5F8FA; -fx-border-color: #B0BEC5; -fx-border-radius: 4; -fx-padding: 6;");
+        comboBox.setPrefWidth(150);
+        comboBox.focusedProperty().addListener((obs, oldVal, newVal) -> {
+            comboBox.setStyle(newVal ? 
+                "-fx-background-color: #F5F8FA; -fx-border-color: #4C7C8A; -fx-border-radius: 4; -fx-padding: 6;" :
+                "-fx-background-color: #F5F8FA; -fx-border-color: #B0BEC5; -fx-border-radius: 4; -fx-padding: 6;");
+        });
     }
 
-    public int getTimeSpentMinutes() {
-        return timeSpentMinutes.get();
-    }
-
-    public IntegerProperty timeSpentMinutesProperty() {
-        return timeSpentMinutes;
-    }
-
-    public void setTimeSpentMinutes(int minutes) {
-        this.timeSpentMinutes.set(minutes);
-    }
-
-    public String getRecurrence() {
-        return recurrence.get();
-    }
-
-    public StringProperty recurrenceProperty() {
-        return recurrence;
-    }
-
-    public void setRecurrence(String recurrence) {
-        this.recurrence.set(recurrence);
-    }
-
-    public boolean isCompleted() {
-        return completed.get();
-    }
-
-    public BooleanProperty completedProperty() {
-        return completed;
-    }
-
-    public void setCompleted(boolean completed) {
-        this.completed.set(completed);
-    }
-
-    // Thêm getter, setter và property cho priority
-    public String getPriority() {
-        return priority.get();
-    }
-
-    public StringProperty priorityProperty() {
-        return priority;
-    }
-
-    public void setPriority(String priority) {
-        this.priority.set(priority);
+    private void styleSpinner(Spinner<?> spinner) {
+        spinner.setStyle("-fx-background-color: #F5F8FA; -fx-border-color: #B0BEC5; -fx-border-radius: 4; -fx-padding: 6;");
+        spinner.getEditor().setFont(Font.font("Arial", 14));
     }
 }
